@@ -1,0 +1,20 @@
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Arduino / ESP32 build outputs
+build/
+dist/
+*.bin
+*.elf
+*.hex
+*.map
+*.partitions.bin
+*.bootloader.bin
+*.ino.bin
+*.ino.with_bootloader.bin
+
+# Local notes or experiment files
+*.log
