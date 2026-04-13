@@ -9,6 +9,7 @@ constexpr uint32_t kRmtResolutionHz = 1000000;
 constexpr uint32_t kCarrierFrequencyHz = 38000;
 constexpr float kCarrierDutyCycle = 0.33f;
 constexpr size_t kMaxEncodedSymbols = 96;
+constexpr uint8_t kSpeakerVolume = 96;
 
 constexpr uint8_t kDelayOptionsSeconds[] = {3, 5, 10};
 size_t g_delayIndex = 0;
@@ -28,6 +29,23 @@ static const uint16_t kInstantDurationsUs[] = {
 };
 constexpr size_t kInstantDurationsCount =
     sizeof(kInstantDurationsUs) / sizeof(kInstantDurationsUs[0]);
+
+void playBeep(float frequencyHz, uint32_t durationMs) {
+  M5.Speaker.tone(frequencyHz, durationMs);
+}
+
+void playCountdownBeep(int remainingSeconds) {
+  if (remainingSeconds <= 0) {
+    return;
+  }
+
+  if (remainingSeconds <= 3) {
+    playBeep(1760.0f, 120);
+    return;
+  }
+
+  playBeep(1046.5f, 70);
+}
 
 void drawScreen() {
   M5.Display.clear();
@@ -123,12 +141,14 @@ void startCountdown() {
   g_countdownActive = true;
   g_countdownEndMs = millis() + (kDelayOptionsSeconds[g_delayIndex] * 1000UL);
   g_lastRenderedSeconds = -1;
+  playBeep(1318.5f, 90);
   setStatus("Counting down");
 }
 
 void cancelCountdown() {
   g_countdownActive = false;
   g_lastRenderedSeconds = -1;
+  playBeep(440.0f, 140);
   setStatus("Cancelled");
 }
 
@@ -144,6 +164,7 @@ void maybeRenderCountdownTick() {
 
   if (remainingSeconds != g_lastRenderedSeconds) {
     g_lastRenderedSeconds = remainingSeconds;
+    playCountdownBeep(remainingSeconds);
     drawScreen();
   }
 }
@@ -162,6 +183,7 @@ void maybeFireShot() {
   setStatus("Sending...");
 
   const bool sent = sendRawDurations(kInstantDurationsUs, kInstantDurationsCount);
+  playBeep(sent ? 2093.0f : 220.0f, sent ? 140 : 220);
   setStatus(sent ? "Done" : "Send failed");
 }
 
@@ -174,6 +196,7 @@ void setup() {
   M5.Power.setExtOutput(true, m5::ext_none);
   M5.Display.setRotation(3);
   M5.Display.setTextSize(2);
+  M5.Speaker.setVolume(kSpeakerVolume);
 
   setupTransmitter();
   drawScreen();
