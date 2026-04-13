@@ -58,7 +58,6 @@ This keeps the first working build dead simple. More complex interactions like l
 ```text
 .
 ├── docs/
-│   ├── design.md
 │   └── setup.md
 └── firmware/
     ├── ir_capture/
@@ -66,6 +65,13 @@ This keeps the first working build dead simple. More complex interactions like l
     └── self_timer/
         └── self_timer.ino
 ```
+
+## Implementation Notes
+
+- Primary target: `M5StickS3` built-in IR first
+- Fallback: use `M5Stack IR Unit (U002)` only if built-in capture or replay is not reliable enough
+- First revision runtime states: `idle`, `countdown`, `sending`, `done`, `error`
+- First revision non-goals: Bulb/TIME support, NVS persistence, deep sleep, and a more complex menu system
 
 ## Milestones
 
