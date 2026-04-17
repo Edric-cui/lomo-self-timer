@@ -5,9 +5,10 @@ This tutorial walks through the full bring-up flow for the current repository:
 1. prepare the Arduino toolchain
 2. upload the IR capture sketch
 3. learn the Lomo remote signal as exact `IrSymbol` data
-4. paste that learned signal into the self-timer sketch
-5. upload the self-timer sketch
-6. validate that the camera triggers reliably
+4. run zero-film diagnostics to prove the TX path
+5. compare the synthetic and legacy hypotheses
+6. upload the self-timer sketch
+7. validate with a strict low-film workflow
 
 Use this guide together with [setup.md](./setup.md) if you need a shorter reference.
 
@@ -15,10 +16,23 @@ Use this guide together with [setup.md](./setup.md) if you need a shorter refere
 
 - `M5StickS3`
 - `Lomo'Instant Wide` original IR lens-cap remote
+- optional: `M5Stack IR Unit (U002)`
 - USB-C cable with data support
 - `Arduino IDE 2.x`
 - `M5Stack` board package
 - `M5Unified` library
+
+If you are using `U002`, the **verified** pin mapping is:
+
+- `GPIO 9` → IR TX (LED output)
+- `GPIO 10` → IR RX (receiver input)
+- red `5V`
+- black `GND`
+
+> **Note:** This is the reverse of what the M5Stack U002 datasheet implies.
+> See [success_2026-04-18.md](./success_2026-04-18.md) for how this was discovered.
+
+The firmware does not strict-auto-detect the `U002`. It lets you choose `Built-in` or `U002` on the device and remembers that choice across reboot.
 
 ## 1. Prepare Arduino IDE
 
@@ -57,7 +71,7 @@ What this sketch already does for you:
 
 - disables the internal speaker amplifier so IR receive works correctly
 - enables `EXT_5V` for the IR hardware
-- listens on the StickS3 built-in IR receive pin
+- listens on the selected IR receive backend
 - rejects captures that are too large for the sender sketch to replay
 
 ## 4. Confirm the Capture Sketch Is Running
@@ -66,7 +80,7 @@ After boot, the StickS3 screen should show:
 
 - `Lomo IR Capture`
 - `Waiting for IR`
-- `Open Serial @115200`
+- `IR: Built-in` or `IR: U002`
 
 If the screen is blank or Serial Monitor shows nothing:
 
@@ -80,6 +94,12 @@ If the screen is blank or Serial Monitor shows nothing:
 2. Keep a realistic short distance between them.
    Do not hold them directly against each other.
 3. Press the `INSTANT` button once.
+
+If you need to switch capture hardware:
+
+1. Press `BtnA`
+2. The screen should switch between `IR: Built-in` and `IR: U002`
+3. The selected backend is saved and reused after reboot
 
 If the capture is valid, Serial Monitor will print something like:
 
@@ -99,6 +119,8 @@ This is now the exact learned waveform, including both levels and durations. Do 
 
 If the capture is too large, Serial Monitor will show a rejection message instead of a paste-ready block. In that case, do not paste it into the sender sketch.
 
+Important: do not automatically treat this capture as the true replay waveform. On this project, capture output is a clue source first. With `U002`, a `38kHz` demodulating receiver may produce noisy output when listening to a remote that is actually closer to `33kHz`.
+
 ## 6. Capture the Same Button Multiple Times
 
 Do not use the first capture blindly.
@@ -107,60 +129,119 @@ Do not use the first capture blindly.
 2. Compare the symbol counts and overall structure.
 3. Pick a capture that looks consistent with the others.
 
-You are looking for broadly similar waveform structure, not perfectly identical numbers down to the microsecond.
+You are looking for broad structure clues, not a guaranteed final replay array. Repeated appearances of short `~480us` marks and a `~7.1-7.4ms` gap are useful evidence even if the full frame remains noisy.
 
-## 7. Paste the Learned Signal Into the Sender Sketch
+## 7. Upload the Diagnostics Sketch
 
-1. Open [firmware/self_timer/self_timer.ino](/Users/edo/Documents/GitHub/lomo-self-timer/firmware/self_timer/self_timer.ino:1).
-2. Find the placeholder block near the top:
+1. Open [firmware/ir_diagnostics/ir_diagnostics.ino](/Users/edo/Documents/GitHub/lomo-self-timer/firmware/ir_diagnostics/ir_diagnostics.ino:1).
+2. Upload it.
+3. Confirm the screen shows:
+   - `IR Diagnostics`
+   - current `TX`
+   - current `RX`
+   - current `Mode`
 
-```cpp
-constexpr bool kHasInstantCode = false;
-static const IrSymbol kInstantSymbols[] = {
-    {9008, 4488, 1, 0},
-    {591, 568, 1, 0},
-    {538, 567, 1, 0},
-    {565, 567, 1, 0},
-};
-constexpr size_t kInstantSymbolCount =
-    sizeof(kInstantSymbols) / sizeof(kInstantSymbols[0]);
-```
+Current controls:
 
-3. Replace `kInstantSymbols[]` with one of the learned `kLearnedCapture...` arrays from Serial Monitor.
-4. Replace `kInstantSymbolCount` with the learned count.
-5. Change:
+- `BtnA` short press: change the currently focused field
+- `BtnA` long press: move focus between `TX`, `RX`, and `Mode`
+- `BtnB`: run the current diagnostic
 
-```cpp
-constexpr bool kHasInstantCode = false;
-```
+Recommended starting pair:
 
-to:
+- `TX: Built-in`
+- `RX: U002`
 
-```cpp
-constexpr bool kHasInstantCode = true;
-```
+Then swap:
 
-After editing, the sender sketch should contain the exact `IrSymbol` data from the capture sketch.
+- `TX: U002`
+- `RX: Built-in`
 
-## 8. Upload the Sender Sketch
+## 8. Run the Zero-Film Gates
+
+Run the diagnostics in this order.
+
+### Gate 1: Beacon 33k Visibility
+
+1. Set `Mode: Beacon 33k`.
+2. Run it with `TX: Built-in`.
+3. Point a phone camera at the emitter.
+4. Look for three clear pulses.
+5. Repeat with `TX: U002`.
+
+This gate is only about proving that the selected TX path is visibly active on the current main hypothesis. Do not use camera film for this.
+
+### Gate 2: Loop Synthetic 33k
+
+1. Set `Mode: Loop Syn33k`.
+2. Keep cross-backend wiring, for example `TX Built-in -> RX U002`.
+3. Press `BtnB`.
+4. Read the on-screen result and Serial Monitor output.
+
+If you get no frame at all, treat that as a TX path, pin mapping, or power-path problem before suspecting anything else.
+
+### Gate 3: Loop Legacy Raw
+
+1. Set `Mode: Loop Legacy`.
+2. Run the same cross-backend pair.
+3. Compare its stability against `Loop Syn33k`.
+
+If `Loop Syn33k` is clearly more stable than `Loop Legacy`, keep synthetic as the only recommended candidate. If `Loop Legacy` is unexpectedly stronger, only then raise the raw route back to candidate status.
+
+### Gate 4: Beacon 38k Sanity Check
+
+1. Set `Mode: Beacon 38k`.
+2. Run it on both TX backends if you want a 38k reference check.
+
+This mode is optional. It is not the main replay candidate.
+
+## 9. Decide Whether Re-Capture Is Worth It
+
+Do not re-capture by default.
+
+Only do a limited re-capture session if:
+
+1. `Loop Syn33k` fails
+2. `Loop Legacy` also fails or is inconclusive
+3. your earlier captures still show repeated `~480 / ~7.2ms / ~480` clues
+
+If you do re-capture:
+
+1. test indoors only
+2. avoid sunlight, strong LED lighting, and phone notifications near the receiver
+3. put the phone in airplane mode and move it away from the receiver
+4. keep the remote and receiver `0.5m-1m` apart
+5. short-press `INSTANT` once per try
+6. capture `10-15` times
+7. only look for repeated short marks and long gaps
+
+Do not expect a perfect replay-ready raw array from `U002` if the original remote is actually off the receiver's preferred band.
+
+## 10. Upload the Sender Sketch
 
 1. Upload [firmware/self_timer/self_timer.ino](/Users/edo/Documents/GitHub/lomo-self-timer/firmware/self_timer/self_timer.ino:1).
 2. Wait for the StickS3 to reboot.
 
+The current proven configuration uses:
+
+- 24-symbol captured waveform at `38kHz`
+- `50%` carrier duty cycle
+- `5×` repeats with `50ms` gap
+- Dual TX (both BuiltIn and U002 fire simultaneously)
+
 The screen should show:
 
-- `Lomo Self Timer`
-- `Delay: 3s`, `5s`, or `10s`
-- `Code: Ready`
-- `Status: Ready`
+- `Lomo Timer`
+- `Dly:3s IR:Built-in` (or `U002`)
+- `Code:Ready`
+- `St:Ready`
 
-If it shows `Code: Missing`, you did not change `kHasInstantCode` to `true`.
-
-## 9. Use the Self-Timer
+## 11. Use the Self-Timer
 
 Current controls:
 
-- `BtnA`: cycle delay while idle
+- `BtnA` short press: cycle delay while idle
+- `BtnA` long press: switch IR backend while idle
 - `BtnB`: start countdown
 - `BtnB` during countdown: cancel
 
@@ -171,9 +252,11 @@ During countdown the footer should show:
 - `BtnA locked`
 - `BtnB cancel`
 
-## 10. Test the Camera Trigger
+When idle, the selected backend is shown on-screen and reused after reboot.
 
-Start with the easiest possible test.
+## 12. Test the Camera Trigger With a Film Budget
+
+Only do this after diagnostics has shown that one candidate path is clearly stronger than the alternatives.
 
 1. Place the camera where you can clearly see whether it fires.
 2. Point the StickS3 at the camera’s IR receiver.
@@ -181,6 +264,8 @@ Start with the easiest possible test.
 4. Start at about `0.5m`.
 5. Press `BtnB`.
 6. Wait for the countdown to finish.
+
+Use at most one film shot per backend until you find a confirmed working path.
 
 Expected on-screen status sequence:
 
@@ -190,7 +275,7 @@ Expected on-screen status sequence:
 
 If the camera fires, the basic replay path is working.
 
-## 11. Validate Real Shooting Distance
+## 13. Validate Real Shooting Distance
 
 Do not stop after the first successful close-range trigger.
 
@@ -229,11 +314,12 @@ You want reliable triggering under the same conditions you will use for actual s
 
 ### Replay only works at impractically short distance
 
-Use the built-in StickS3 IR path first, but consider the `M5Stack IR Unit (U002)` fallback if:
+With dual TX mode (default), both BuiltIn and U002 fire simultaneously. If
+range is still insufficient:
 
-- capture is unreliable
-- replay range is too short for real use
-- emitter placement needs to be separate from the StickS3 body
+- ensure `kDualTxEnabled = true` in the firmware (this is the default)
+- verify U002 is flashing by using `Beacon 38k` or `Sweep U002` in diagnostics
+- consider hardware modifications (higher-power IR LED, external transistor driver, reflector)
 
 ## 13. Practical Workflow Tip
 

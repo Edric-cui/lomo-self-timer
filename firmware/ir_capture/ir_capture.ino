@@ -1,21 +1,26 @@
 #include <M5Unified.h>
+#include <Preferences.h>
+#include "driver/rmt_common.h"
 #include "driver/rmt_rx.h"
+#include "../common/ir_backend.h"
 #include "../common/ir_frame.h"
 
 namespace {
 
-constexpr gpio_num_t kIrReceivePin = GPIO_NUM_42;
 constexpr size_t kMaxCaptureSymbols = 128;
 constexpr uint32_t kRmtResolutionHz = 1000000;
 constexpr uint32_t kSignalMinNs = 1000;
 constexpr uint32_t kSignalMaxNs = 20000000;
 constexpr size_t kMinReplayableSymbols = 4;
+constexpr uint32_t kBackendSwitchNoticeMs = 500;
 
 rmt_channel_handle_t g_rxChannel = nullptr;
 rmt_symbol_word_t g_rxSymbols[kMaxCaptureSymbols];
 volatile bool g_rxDone = false;
 volatile size_t g_rxSymbolCount = 0;
 uint32_t g_captureCount = 0;
+Preferences g_preferences;
+IrBackend g_backend = IrBackend::BuiltIn;
 
 enum class CaptureValidation {
   kOk,
@@ -48,9 +53,14 @@ void beginReceive() {
   ));
 }
 
+String backendLine() {
+  return String("IR: ") + getIrBackendPins(g_backend).label;
+}
+
 void setupReceiver() {
+  const IrBackendPins pins = getIrBackendPins(g_backend);
   rmt_rx_channel_config_t channelConfig = {};
-  channelConfig.gpio_num = kIrReceivePin;
+  channelConfig.gpio_num = pins.rx;
   channelConfig.clk_src = RMT_CLK_SRC_DEFAULT;
   channelConfig.resolution_hz = kRmtResolutionHz;
   channelConfig.mem_block_symbols = kMaxCaptureSymbols;
@@ -63,15 +73,57 @@ void setupReceiver() {
   ESP_ERROR_CHECK(rmt_enable(g_rxChannel));
 }
 
-void printStatus(const char* line1, const char* line2 = nullptr) {
+void teardownReceiver() {
+  if (g_rxChannel == nullptr) {
+    return;
+  }
+
+  rmt_disable(g_rxChannel);
+  rmt_del_channel(g_rxChannel);
+  g_rxChannel = nullptr;
+}
+
+void recreateReceiver() {
+  g_rxDone = false;
+  g_rxSymbolCount = 0;
+  teardownReceiver();
+  setupReceiver();
+  beginReceive();
+}
+
+void printStatus(
+    const String& line1,
+    const String& line2 = String(),
+    const String& line3 = String()
+) {
   M5.Display.clear();
   M5.Display.setCursor(0, 0);
   M5.Display.println("Lomo IR Capture");
   M5.Display.println();
   M5.Display.println(line1);
-  if (line2 != nullptr) {
+  if (!line2.isEmpty()) {
     M5.Display.println(line2);
   }
+  if (!line3.isEmpty()) {
+    M5.Display.println(line3);
+  }
+}
+
+void showWaitingStatus() {
+  printStatus("Waiting for IR", backendLine(), "BtnA switch IR");
+}
+
+void switchBackend(IrBackend backend) {
+  if (backend == g_backend) {
+    return;
+  }
+
+  g_backend = backend;
+  saveIrBackendPreference(g_preferences, g_backend);
+  recreateReceiver();
+  printStatus("Backend updated", backendLine(), "Waiting for IR");
+  delay(kBackendSwitchNoticeMs);
+  showWaitingStatus();
 }
 
 CaptureValidation validateCapture(size_t symbolCount) {
@@ -157,6 +209,7 @@ void renderCaptureSummary(size_t symbolCount, CaptureValidation validation) {
   M5.Display.println();
   M5.Display.printf("Captured: %lu\n", static_cast<unsigned long>(g_captureCount));
   M5.Display.printf("Symbols:  %u\n", static_cast<unsigned>(symbolCount));
+  M5.Display.println(backendLine());
   M5.Display.println();
 
   switch (validation) {
@@ -183,11 +236,13 @@ void setup() {
   M5.begin(config);
 
   Serial.begin(115200);
-  M5.Power.setExtOutput(true, m5::ext_none);
+  g_preferences.begin(kIrPrefsNamespace, false);
+  g_backend = loadIrBackendPreference(g_preferences);
+  M5.Power.setExtOutput(true);
 
   M5.Display.setRotation(3);
   M5.Display.setTextSize(2);
-  printStatus("Waiting for IR", "Open Serial @115200");
+  showWaitingStatus();
 
   setupReceiver();
   beginReceive();
@@ -195,6 +250,10 @@ void setup() {
 
 void loop() {
   M5.update();
+
+  if (M5.BtnA.wasClicked()) {
+    switchBackend(nextIrBackend(g_backend));
+  }
 
   if (!g_rxDone) {
     delay(10);
@@ -210,6 +269,6 @@ void loop() {
   }
   renderCaptureSummary(g_rxSymbolCount, validation);
   delay(250);
-  printStatus("Waiting for IR", "Open Serial @115200");
+  showWaitingStatus();
   beginReceive();
 }

@@ -1,4 +1,5 @@
 #include <M5Unified.h>
+#include <Preferences.h>
 #include "driver/rmt_common.h"
 #include "driver/rmt_tx.h"
 #include "driver/rmt_encoder.h"
@@ -9,11 +10,11 @@ namespace {
 
 constexpr uint32_t kRmtResolutionHz = 1000000;
 constexpr uint32_t kCarrierFrequencyHz = 38000;
-constexpr float kCarrierDutyCycle = 0.50f;
+constexpr float kCarrierDutyCycle = 0.33f;
 constexpr uint8_t kSpeakerVolume = 192;
-constexpr uint8_t kSendRepeats = 5;
-constexpr uint32_t kRepeatGapMs = 50;
-constexpr bool kEnableDebugBeeps = true;
+constexpr uint8_t kSendRepeats = 1;
+constexpr uint32_t kRepeatGapMs = 30;
+constexpr bool kEnableDebugBeeps = false;
 
 constexpr uint8_t kDelayOptionsSeconds[] = {3, 5, 10};
 size_t g_delayIndex = 0;
@@ -24,8 +25,8 @@ String g_status = "Ready";
 
 rmt_channel_handle_t g_txChannel = nullptr;
 rmt_encoder_handle_t g_copyEncoder = nullptr;
-rmt_channel_handle_t g_txChannel2 = nullptr;
-rmt_encoder_handle_t g_copyEncoder2 = nullptr;
+Preferences g_preferences;
+IrBackend g_backend = IrBackend::BuiltIn;
 
 // Current best candidate: an earlier 24-symbol capture that was notably more
 // stable than the later fragmented traces.
@@ -79,12 +80,6 @@ void playCountdownBeep(int remainingSeconds) {
     return;
   }
 
-  // Skip the final countdown beep so the last audible cue does not overlap
-  // with the IR trigger moment.
-  if (remainingSeconds == 1) {
-    return;
-  }
-
   if (remainingSeconds <= 3) {
     playBeep(1760.0f, 120);
     return;
@@ -94,11 +89,13 @@ void playCountdownBeep(int remainingSeconds) {
 }
 
 void drawScreen() {
+  const IrBackendPins pins = getIrBackendPins(g_backend);
   M5.Display.clear();
   M5.Display.setCursor(0, 0);
   M5.Display.println("Lomo Timer");
-  M5.Display.printf("Dly:%us IR:Dual\n",
-                    kDelayOptionsSeconds[g_delayIndex]);
+  M5.Display.printf("Dly:%us IR:%s\n",
+                    kDelayOptionsSeconds[g_delayIndex],
+                    pins.label);
   M5.Display.printf("Code:%s\n", kHasInstantCode ? "Ready" : "Miss");
 
   if (g_countdownActive) {
@@ -117,6 +114,7 @@ void drawScreen() {
     M5.Display.println("B cancel");
   } else {
     M5.Display.println("A tap delay");
+    M5.Display.println("A hold IR");
     M5.Display.println("B start");
   }
 }
@@ -126,10 +124,10 @@ void setStatus(const String& status) {
   drawScreen();
 }
 
-void setupOneChannel(gpio_num_t pin, rmt_channel_handle_t* channel,
-                     rmt_encoder_handle_t* encoder) {
+void setupTransmitter() {
+  const IrBackendPins pins = getIrBackendPins(g_backend);
   rmt_tx_channel_config_t channelConfig = {};
-  channelConfig.gpio_num = pin;
+  channelConfig.gpio_num = pins.tx;
   channelConfig.clk_src = RMT_CLK_SRC_DEFAULT;
   channelConfig.resolution_hz = kRmtResolutionHz;
   channelConfig.mem_block_symbols = 64;
@@ -137,51 +135,46 @@ void setupOneChannel(gpio_num_t pin, rmt_channel_handle_t* channel,
   channelConfig.flags.invert_out = false;
   channelConfig.flags.with_dma = false;
 
-  ESP_ERROR_CHECK(rmt_new_tx_channel(&channelConfig, channel));
+  ESP_ERROR_CHECK(rmt_new_tx_channel(&channelConfig, &g_txChannel));
 
   rmt_carrier_config_t carrierConfig = {};
   carrierConfig.frequency_hz = kCarrierFrequencyHz;
   carrierConfig.duty_cycle = kCarrierDutyCycle;
   carrierConfig.flags.polarity_active_low = false;
-  ESP_ERROR_CHECK(rmt_apply_carrier(*channel, &carrierConfig));
+  ESP_ERROR_CHECK(rmt_apply_carrier(g_txChannel, &carrierConfig));
 
   rmt_copy_encoder_config_t copyConfig = {};
-  ESP_ERROR_CHECK(rmt_new_copy_encoder(&copyConfig, encoder));
-  ESP_ERROR_CHECK(rmt_enable(*channel));
-}
-
-void teardownOneChannel(rmt_channel_handle_t* channel,
-                        rmt_encoder_handle_t* encoder) {
-  if (*channel != nullptr) {
-    rmt_disable(*channel);
-    rmt_del_channel(*channel);
-    *channel = nullptr;
-  }
-
-  if (*encoder != nullptr) {
-    rmt_del_encoder(*encoder);
-    *encoder = nullptr;
-  }
-}
-
-void setupTransmitter() {
-  const IrBackendPins builtInPins = getIrBackendPins(IrBackend::BuiltIn);
-  const IrBackendPins u002Pins = getIrBackendPins(IrBackend::U002);
-  setupOneChannel(builtInPins.tx, &g_txChannel, &g_copyEncoder);
-  setupOneChannel(u002Pins.tx, &g_txChannel2, &g_copyEncoder2);
-  Serial.printf("Dual TX: BuiltIn (GPIO %d) + U002 (GPIO %d)\n",
-                static_cast<int>(builtInPins.tx),
-                static_cast<int>(u002Pins.tx));
+  ESP_ERROR_CHECK(rmt_new_copy_encoder(&copyConfig, &g_copyEncoder));
+  ESP_ERROR_CHECK(rmt_enable(g_txChannel));
 }
 
 void teardownTransmitter() {
-  teardownOneChannel(&g_txChannel, &g_copyEncoder);
-  teardownOneChannel(&g_txChannel2, &g_copyEncoder2);
+  if (g_txChannel != nullptr) {
+    rmt_disable(g_txChannel);
+    rmt_del_channel(g_txChannel);
+    g_txChannel = nullptr;
+  }
+
+  if (g_copyEncoder != nullptr) {
+    rmt_del_encoder(g_copyEncoder);
+    g_copyEncoder = nullptr;
+  }
 }
 
 void recreateTransmitter() {
   teardownTransmitter();
   setupTransmitter();
+}
+
+void switchBackend(IrBackend backend) {
+  if (backend == g_backend) {
+    return;
+  }
+
+  g_backend = backend;
+  saveIrBackendPreference(g_preferences, g_backend);
+  recreateTransmitter();
+  setStatus(String("IR: ") + getIrBackendPins(g_backend).label);
 }
 
 SendResult sendSymbolsOnce(const IrSymbol* symbols, size_t count) {
@@ -208,14 +201,11 @@ SendResult sendSymbolsOnce(const IrSymbol* symbols, size_t count) {
   transmitConfig.loop_count = 0;
   transmitConfig.flags.eot_level = 0;
 
-  const size_t byteCount = count * sizeof(rmt_symbol_word_t);
-
-  // Fire primary TX channel
   esp_err_t result = rmt_transmit(
       g_txChannel,
       g_copyEncoder,
       encoded,
-      byteCount,
+      count * sizeof(rmt_symbol_word_t),
       &transmitConfig
   );
 
@@ -223,23 +213,7 @@ SendResult sendSymbolsOnce(const IrSymbol* symbols, size_t count) {
     return SendResult::kTransmitError;
   }
 
-  // Fire secondary TX channel simultaneously
-  if (g_txChannel2 != nullptr) {
-    rmt_transmit(
-        g_txChannel2,
-        g_copyEncoder2,
-        encoded,
-        byteCount,
-        &transmitConfig
-    );
-    // Best-effort: don't fail the whole send if secondary has issues
-  }
-
   result = rmt_tx_wait_all_done(g_txChannel, 1000);
-  if (g_txChannel2 != nullptr) {
-    rmt_tx_wait_all_done(g_txChannel2, 1000);
-  }
-
   return (result == ESP_OK) ? SendResult::kOk : SendResult::kTransmitError;
 }
 
@@ -330,6 +304,8 @@ void setup() {
   config.internal_spk = kEnableDebugBeeps;
   M5.begin(config);
 
+  g_preferences.begin(kIrPrefsNamespace, false);
+  g_backend = loadIrBackendPreference(g_preferences);
   M5.Power.setExtOutput(true);
   M5.Display.setRotation(3);
   M5.Display.setTextSize(2);
@@ -344,7 +320,9 @@ void setup() {
 void loop() {
   M5.update();
 
-  if (!g_countdownActive && M5.BtnA.wasClicked()) {
+  if (!g_countdownActive && M5.BtnA.wasHold()) {
+    switchBackend(nextIrBackend(g_backend));
+  } else if (!g_countdownActive && M5.BtnA.wasClicked()) {
     g_delayIndex = (g_delayIndex + 1) %
         (sizeof(kDelayOptionsSeconds) / sizeof(kDelayOptionsSeconds[0]));
     setStatus("Delay updated");
