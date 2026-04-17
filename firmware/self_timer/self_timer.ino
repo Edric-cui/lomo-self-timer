@@ -1,6 +1,7 @@
 #include <M5Unified.h>
 #include "driver/rmt_tx.h"
 #include "driver/rmt_encoder.h"
+#include "../common/ir_frame.h"
 
 namespace {
 
@@ -8,8 +9,7 @@ constexpr gpio_num_t kIrSendPin = GPIO_NUM_46;
 constexpr uint32_t kRmtResolutionHz = 1000000;
 constexpr uint32_t kCarrierFrequencyHz = 38000;
 constexpr float kCarrierDutyCycle = 0.33f;
-constexpr size_t kMaxEncodedSymbols = 96;
-constexpr uint8_t kSpeakerVolume = 96;
+constexpr uint8_t kSpeakerVolume = 192;
 
 constexpr uint8_t kDelayOptionsSeconds[] = {3, 5, 10};
 size_t g_delayIndex = 0;
@@ -21,14 +21,42 @@ String g_status = "Ready";
 rmt_channel_handle_t g_txChannel = nullptr;
 rmt_encoder_handle_t g_copyEncoder = nullptr;
 
-// Replace this block with the raw durations printed by firmware/ir_capture/ir_capture.ino.
-// Keep the sequence as alternating mark, space, mark, space in microseconds.
-constexpr bool kHasInstantCode = false;
-static const uint16_t kInstantDurationsUs[] = {
-    9008, 4488, 591, 568, 538, 567, 565, 567
+// Replace this block with the IrSymbol capture printed by firmware/ir_capture/ir_capture.ino.
+constexpr bool kHasInstantCode = true;
+static const IrSymbol kInstantSymbols[] = {
+    {1268, 733, 0, 1},
+    {953, 733, 0, 1},
+    {197, 1206, 0, 1},
+    {1267, 807, 0, 1},
+    {821, 815, 0, 1},
+    {194, 1183, 0, 1},
+    {508, 1255, 0, 1},
+    {432, 1204, 0, 1},
+    {563, 1250, 0, 1},
+    {378, 1235, 0, 1},
+    {506, 1360, 0, 1},
+    {1059, 7220, 0, 1},
+    {1268, 758, 0, 1},
+    {929, 706, 0, 1},
+    {274, 1154, 0, 1},
+    {1269, 832, 0, 1},
+    {825, 708, 0, 1},
+    {331, 1122, 0, 1},
+    {535, 1152, 0, 1},
+    {510, 1204, 0, 1},
+    {537, 1149, 0, 1},
+    {512, 1226, 0, 1},
+    {482, 0, 0, 1},
 };
-constexpr size_t kInstantDurationsCount =
-    sizeof(kInstantDurationsUs) / sizeof(kInstantDurationsUs[0]);
+constexpr size_t kInstantSymbolCount =
+    sizeof(kInstantSymbols) / sizeof(kInstantSymbols[0]);
+
+enum class SendResult {
+  kOk,
+  kInvalid,
+  kTooLong,
+  kTransmitError,
+};
 
 void playBeep(float frequencyHz, uint32_t durationMs) {
   M5.Speaker.tone(frequencyHz, durationMs);
@@ -69,8 +97,13 @@ void drawScreen() {
   M5.Display.println();
   M5.Display.printf("Status: %s\n", g_status.c_str());
   M5.Display.println();
-  M5.Display.println("BtnA delay");
-  M5.Display.println("BtnB start/cancel");
+  if (g_countdownActive) {
+    M5.Display.println("BtnA locked");
+    M5.Display.println("BtnB cancel");
+  } else {
+    M5.Display.println("BtnA delay");
+    M5.Display.println("BtnB start");
+  }
 }
 
 void setStatus(const String& status) {
@@ -101,20 +134,22 @@ void setupTransmitter() {
   ESP_ERROR_CHECK(rmt_enable(g_txChannel));
 }
 
-bool sendRawDurations(const uint16_t* durations, size_t count) {
-  if (count < 2 || count > (kMaxEncodedSymbols * 2)) {
-    return false;
+SendResult sendSymbols(const IrSymbol* symbols, size_t count) {
+  if (count == 0) {
+    return SendResult::kInvalid;
   }
 
-  rmt_symbol_word_t symbols[kMaxEncodedSymbols];
-  size_t symbolCount = 0;
+  if (count > kMaxReplaySymbols) {
+    return SendResult::kTooLong;
+  }
 
-  for (size_t i = 0; i < count && symbolCount < kMaxEncodedSymbols; i += 2) {
-    symbols[symbolCount].level0 = 1;
-    symbols[symbolCount].duration0 = durations[i];
-    symbols[symbolCount].level1 = 0;
-    symbols[symbolCount].duration1 = (i + 1 < count) ? durations[i + 1] : 0;
-    ++symbolCount;
+  rmt_symbol_word_t encoded[kMaxReplaySymbols];
+
+  for (size_t i = 0; i < count; ++i) {
+    encoded[i].level0 = symbols[i].level0 ? 1 : 0;
+    encoded[i].duration0 = symbols[i].duration0;
+    encoded[i].level1 = symbols[i].level1 ? 1 : 0;
+    encoded[i].duration1 = symbols[i].duration1;
   }
 
   rmt_transmit_config_t transmitConfig = {};
@@ -124,17 +159,17 @@ bool sendRawDurations(const uint16_t* durations, size_t count) {
   esp_err_t result = rmt_transmit(
       g_txChannel,
       g_copyEncoder,
-      symbols,
-      symbolCount * sizeof(rmt_symbol_word_t),
+      encoded,
+      count * sizeof(rmt_symbol_word_t),
       &transmitConfig
   );
 
   if (result != ESP_OK) {
-    return false;
+    return SendResult::kTransmitError;
   }
 
   result = rmt_tx_wait_all_done(g_txChannel, 1000);
-  return result == ESP_OK;
+  return (result == ESP_OK) ? SendResult::kOk : SendResult::kTransmitError;
 }
 
 void startCountdown() {
@@ -182,9 +217,24 @@ void maybeFireShot() {
   g_lastRenderedSeconds = -1;
   setStatus("Sending...");
 
-  const bool sent = sendRawDurations(kInstantDurationsUs, kInstantDurationsCount);
+  const SendResult result = sendSymbols(kInstantSymbols, kInstantSymbolCount);
+  const bool sent = result == SendResult::kOk;
   playBeep(sent ? 2093.0f : 220.0f, sent ? 140 : 220);
-  setStatus(sent ? "Done" : "Send failed");
+
+  switch (result) {
+    case SendResult::kOk:
+      setStatus("Done");
+      break;
+    case SendResult::kTooLong:
+      setStatus("Code too long");
+      break;
+    case SendResult::kInvalid:
+      setStatus("Code invalid");
+      break;
+    case SendResult::kTransmitError:
+      setStatus("Send failed");
+      break;
+  }
 }
 
 }  // namespace
@@ -205,14 +255,10 @@ void setup() {
 void loop() {
   M5.update();
 
-  if (M5.BtnA.wasPressed()) {
+  if (!g_countdownActive && M5.BtnA.wasPressed()) {
     g_delayIndex = (g_delayIndex + 1) %
         (sizeof(kDelayOptionsSeconds) / sizeof(kDelayOptionsSeconds[0]));
-    if (!g_countdownActive) {
-      setStatus("Delay updated");
-    } else {
-      drawScreen();
-    }
+    setStatus("Delay updated");
   }
 
   if (M5.BtnB.wasPressed()) {

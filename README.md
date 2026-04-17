@@ -16,9 +16,9 @@ The risky part of this project is not the UI or the countdown logic. It is the I
 So the repository starts with two separate Arduino sketches:
 
 - `firmware/ir_capture/ir_capture.ino`
-  Captures raw IR timings from the original remote and prints a paste-ready C array to Serial.
+  Captures exact RMT IR symbols from the original remote and prints a paste-ready C array to Serial.
 - `firmware/self_timer/self_timer.ino`
-  A countdown sender scaffold for the M5StickS3. It is ready for learned raw timings, but does not assume the Lomo code is already known.
+  A countdown sender scaffold for the M5StickS3. It is ready for learned IR symbols, but does not assume the Lomo code is already known.
 
 That split keeps bring-up simple:
 
@@ -36,7 +36,7 @@ That split keeps bring-up simple:
 
 For the first sender scaffold:
 
-- `BtnA`: cycle delay (`3s`, `5s`, `10s`)
+- `BtnA`: cycle delay (`3s`, `5s`, `10s`) while idle
 - `BtnB`: start countdown
 - `BtnB` again while counting down: cancel
 
@@ -50,15 +50,18 @@ This keeps the first working build dead simple. More complex interactions like l
 4. Open `firmware/ir_capture/ir_capture.ino`.
 5. Upload it to the board and open Serial Monitor at `115200`.
 6. Point the original Lomo remote at the StickS3 and press `INSTANT`.
-7. Copy the printed raw durations into `firmware/self_timer/self_timer.ino`.
+7. Copy the printed `IrSymbol` array and count into `firmware/self_timer/self_timer.ino`.
 8. Set `kHasInstantCode` to `true`, rebuild, and test the sender sketch.
+
+For the full bring-up walkthrough, see [docs/tutorial.md](/Users/edo/Documents/GitHub/lomo-self-timer/docs/tutorial.md:1).
 
 ## Repository Layout
 
 ```text
 .
 ├── docs/
-│   └── setup.md
+│   ├── setup.md
+│   └── tutorial.md
 └── firmware/
     ├── ir_capture/
     │   └── ir_capture.ino

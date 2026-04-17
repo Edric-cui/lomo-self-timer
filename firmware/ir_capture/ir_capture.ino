@@ -1,19 +1,28 @@
 #include <M5Unified.h>
 #include "driver/rmt_rx.h"
+#include "../common/ir_frame.h"
 
 namespace {
 
 constexpr gpio_num_t kIrReceivePin = GPIO_NUM_42;
-constexpr size_t kMaxSymbols = 128;
+constexpr size_t kMaxCaptureSymbols = 128;
 constexpr uint32_t kRmtResolutionHz = 1000000;
 constexpr uint32_t kSignalMinNs = 1000;
 constexpr uint32_t kSignalMaxNs = 20000000;
+constexpr size_t kMinReplayableSymbols = 4;
 
 rmt_channel_handle_t g_rxChannel = nullptr;
-rmt_symbol_word_t g_rxSymbols[kMaxSymbols];
+rmt_symbol_word_t g_rxSymbols[kMaxCaptureSymbols];
 volatile bool g_rxDone = false;
 volatile size_t g_rxSymbolCount = 0;
 uint32_t g_captureCount = 0;
+
+enum class CaptureValidation {
+  kOk,
+  kEmpty,
+  kTooShort,
+  kTooLong,
+};
 
 bool IRAM_ATTR onReceiveDone(
     rmt_channel_handle_t channel,
@@ -44,7 +53,7 @@ void setupReceiver() {
   channelConfig.gpio_num = kIrReceivePin;
   channelConfig.clk_src = RMT_CLK_SRC_DEFAULT;
   channelConfig.resolution_hz = kRmtResolutionHz;
-  channelConfig.mem_block_symbols = kMaxSymbols;
+  channelConfig.mem_block_symbols = kMaxCaptureSymbols;
 
   ESP_ERROR_CHECK(rmt_new_rx_channel(&channelConfig, &g_rxChannel));
 
@@ -65,45 +74,83 @@ void printStatus(const char* line1, const char* line2 = nullptr) {
   }
 }
 
-void printDurationsAsArray(size_t symbolCount) {
+CaptureValidation validateCapture(size_t symbolCount) {
+  if (symbolCount == 0) {
+    return CaptureValidation::kEmpty;
+  }
+
+  if (symbolCount < kMinReplayableSymbols) {
+    return CaptureValidation::kTooShort;
+  }
+
+  if (symbolCount > kMaxReplaySymbols) {
+    return CaptureValidation::kTooLong;
+  }
+
+  return CaptureValidation::kOk;
+}
+
+void printCaptureError(size_t symbolCount, CaptureValidation validation) {
   const uint32_t captureIndex = ++g_captureCount;
-  bool firstValue = true;
+
+  Serial.println();
+  Serial.printf("=== Capture %lu ===\n", static_cast<unsigned long>(captureIndex));
+  Serial.printf("Symbol count: %u\n", static_cast<unsigned>(symbolCount));
+  if (validation == CaptureValidation::kEmpty) {
+    Serial.println("Capture rejected: frame is empty.");
+    return;
+  }
+
+  if (validation == CaptureValidation::kTooShort) {
+    Serial.printf(
+        "Capture rejected: %u symbols is too short and looks like noise.\n",
+        static_cast<unsigned>(symbolCount)
+    );
+    return;
+  }
+
+  Serial.printf(
+      "Capture rejected: %u symbols exceeds replay limit of %u.\n",
+      static_cast<unsigned>(symbolCount),
+      static_cast<unsigned>(kMaxReplaySymbols)
+  );
+}
+
+void printSymbolsAsArray(size_t symbolCount) {
+  const uint32_t captureIndex = ++g_captureCount;
 
   Serial.println();
   Serial.printf("=== Capture %lu ===\n", static_cast<unsigned long>(captureIndex));
   Serial.printf("Symbol count: %u\n", static_cast<unsigned>(symbolCount));
   Serial.println("// Paste into firmware/self_timer/self_timer.ino");
-  Serial.printf("static const uint16_t kLearnedCapture%lu[] = {\n  ", static_cast<unsigned long>(captureIndex));
+  Serial.printf("static const IrSymbol kLearnedCapture%lu[] = {\n", static_cast<unsigned long>(captureIndex));
 
   for (size_t i = 0; i < symbolCount; ++i) {
     const uint32_t d0 = g_rxSymbols[i].duration0;
     const uint32_t d1 = g_rxSymbols[i].duration1;
+    const uint32_t l0 = g_rxSymbols[i].level0;
+    const uint32_t l1 = g_rxSymbols[i].level1;
+    const bool isLastSymbol = (i + 1 == symbolCount);
 
-    if (d0 > 0) {
-      if (!firstValue) {
-        Serial.print(", ");
-      }
-      Serial.print(d0);
-      firstValue = false;
-    }
-
-    if (d1 > 0) {
-      if (!firstValue) {
-        Serial.print(", ");
-      }
-      Serial.print(d1);
-      firstValue = false;
-    }
-
-    if ((i + 1) % 4 == 0 && i + 1 < symbolCount && !firstValue) {
-      Serial.print("\n  ");
-    }
+    Serial.printf(
+        "  {%u, %u, %u, %u}%s\n",
+        static_cast<unsigned>(d0),
+        static_cast<unsigned>(d1),
+        static_cast<unsigned>(l0),
+        static_cast<unsigned>(l1),
+        isLastSymbol ? "" : ","
+    );
   }
 
-  Serial.println("\n};");
+  Serial.println("};");
+  Serial.printf(
+      "constexpr size_t kLearnedCapture%luCount = %u;\n",
+      static_cast<unsigned long>(captureIndex),
+      static_cast<unsigned>(symbolCount)
+  );
 }
 
-void renderCaptureSummary(size_t symbolCount) {
+void renderCaptureSummary(size_t symbolCount, CaptureValidation validation) {
   M5.Display.clear();
   M5.Display.setCursor(0, 0);
   M5.Display.println("Lomo IR Capture");
@@ -111,7 +158,21 @@ void renderCaptureSummary(size_t symbolCount) {
   M5.Display.printf("Captured: %lu\n", static_cast<unsigned long>(g_captureCount));
   M5.Display.printf("Symbols:  %u\n", static_cast<unsigned>(symbolCount));
   M5.Display.println();
-  M5.Display.println("See Serial Monitor");
+
+  switch (validation) {
+    case CaptureValidation::kOk:
+      M5.Display.println("See Serial Monitor");
+      break;
+    case CaptureValidation::kEmpty:
+      M5.Display.println("Rejected: empty");
+      break;
+    case CaptureValidation::kTooShort:
+      M5.Display.println("Rejected: noise");
+      break;
+    case CaptureValidation::kTooLong:
+      M5.Display.println("Rejected: too long");
+      break;
+  }
 }
 
 }  // namespace
@@ -141,8 +202,13 @@ void loop() {
   }
 
   g_rxDone = false;
-  printDurationsAsArray(g_rxSymbolCount);
-  renderCaptureSummary(g_rxSymbolCount);
+  const CaptureValidation validation = validateCapture(g_rxSymbolCount);
+  if (validation == CaptureValidation::kOk) {
+    printSymbolsAsArray(g_rxSymbolCount);
+  } else {
+    printCaptureError(g_rxSymbolCount, validation);
+  }
+  renderCaptureSummary(g_rxSymbolCount, validation);
   delay(250);
   printStatus("Waiting for IR", "Open Serial @115200");
   beginReceive();

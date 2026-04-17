@@ -1,5 +1,7 @@
 # Setup Notes
 
+For a full step-by-step walkthrough, see [tutorial.md](/Users/edo/Documents/GitHub/lomo-self-timer/docs/tutorial.md:1).
+
 ## Toolchain
 
 - `Arduino IDE 2.x`
@@ -38,8 +40,9 @@ What success looks like:
 
 - the screen says it is waiting for IR
 - Serial Monitor shows one or more captures
-- each capture prints a paste-ready `uint16_t` array
+- each valid capture prints a paste-ready `IrSymbol` array and count
 - repeated presses of the same Lomo button look broadly consistent
+- oversize captures are rejected instead of being offered for replay
 
 Use the original remote at a realistic distance and angle. The M5 documentation notes that too-close IR alignment can also cause abnormal reception, so do not test with the remotes touching each other.
 
@@ -48,7 +51,7 @@ Use the original remote at a realistic distance and angle. The M5 documentation 
 After capture:
 
 1. open `firmware/self_timer/self_timer.ino`
-2. replace the placeholder timings with the learned raw durations
+2. replace the placeholder symbol array and count with the learned `IrSymbol` capture
 3. set `kHasInstantCode` to `true`
 4. upload and test replay against the camera
 
