@@ -4,18 +4,15 @@
 #include "driver/rmt_encoder.h"
 #include "../common/ir_backend.h"
 #include "../common/ir_frame.h"
+#include "../common/replay_profile.h"
 
 namespace {
 
 constexpr uint32_t kRmtResolutionHz = 1000000;
-constexpr uint32_t kCarrierFrequencyHz = 38000;
-constexpr float kCarrierDutyCycle = 0.50f;
 constexpr uint8_t kSpeakerVolume = 192;
-constexpr uint8_t kSendRepeats = 5;
-constexpr uint32_t kRepeatGapMs = 50;
 constexpr bool kEnableDebugBeeps = true;
 
-constexpr uint8_t kDelayOptionsSeconds[] = {3, 5, 10};
+constexpr uint8_t kDelayOptionsSeconds[] = {3, 5, 10, 15, 20};
 size_t g_delayIndex = 0;
 bool g_countdownActive = false;
 uint32_t g_countdownEndMs = 0;
@@ -26,38 +23,6 @@ rmt_channel_handle_t g_txChannel = nullptr;
 rmt_encoder_handle_t g_copyEncoder = nullptr;
 rmt_channel_handle_t g_txChannel2 = nullptr;
 rmt_encoder_handle_t g_copyEncoder2 = nullptr;
-
-// Current best candidate: an earlier 24-symbol capture that was notably more
-// stable than the later fragmented traces.
-constexpr bool kHasInstantCode = true;
-static const IrSymbol kInstantSymbols[] = {
-    {1158, 530, 0, 1},
-    {1156, 583, 0, 1},
-    {455, 1181, 0, 1},
-    {1182, 531, 0, 1},
-    {1156, 556, 0, 1},
-    {457, 1231, 0, 1},
-    {455, 1258, 0, 1},
-    {453, 1233, 0, 1},
-    {428, 1235, 0, 1},
-    {481, 1231, 0, 1},
-    {480, 1258, 0, 1},
-    {1156, 7280, 0, 1},
-    {1205, 508, 0, 1},
-    {1183, 556, 0, 1},
-    {428, 1233, 0, 1},
-    {1105, 607, 0, 1},
-    {1154, 533, 0, 1},
-    {455, 1234, 0, 1},
-    {453, 1285, 0, 1},
-    {455, 1206, 0, 1},
-    {455, 1233, 0, 1},
-    {479, 1208, 0, 1},
-    {482, 1230, 0, 1},
-    {1158, 0, 0, 1},
-};
-constexpr size_t kInstantSymbolCount =
-    sizeof(kInstantSymbols) / sizeof(kInstantSymbols[0]);
 
 enum class SendResult {
   kOk,
@@ -90,7 +55,14 @@ void playCountdownBeep(int remainingSeconds) {
     return;
   }
 
-  playBeep(1046.5f, 70);
+  // Split the countdown into long / medium / final phases so the user can
+  // hear roughly how much setup time remains without looking at the screen.
+  if (remainingSeconds <= 10) {
+    playBeep(1046.5f, 70);
+    return;
+  }
+
+  playBeep(784.0f, 55);
 }
 
 void drawScreen() {
@@ -99,7 +71,7 @@ void drawScreen() {
   M5.Display.println("Lomo Timer");
   M5.Display.printf("Dly:%us IR:Dual\n",
                     kDelayOptionsSeconds[g_delayIndex]);
-  M5.Display.printf("Code:%s\n", kHasInstantCode ? "Ready" : "Miss");
+  M5.Display.println("Code:Ready");
 
   if (g_countdownActive) {
     const uint32_t now = millis();
@@ -140,8 +112,8 @@ void setupOneChannel(gpio_num_t pin, rmt_channel_handle_t* channel,
   ESP_ERROR_CHECK(rmt_new_tx_channel(&channelConfig, channel));
 
   rmt_carrier_config_t carrierConfig = {};
-  carrierConfig.frequency_hz = kCarrierFrequencyHz;
-  carrierConfig.duty_cycle = kCarrierDutyCycle;
+  carrierConfig.frequency_hz = replay_profile::kCarrierFrequencyHz;
+  carrierConfig.duty_cycle = replay_profile::kCarrierDutyCycle;
   carrierConfig.flags.polarity_active_low = false;
   ESP_ERROR_CHECK(rmt_apply_carrier(*channel, &carrierConfig));
 
@@ -244,14 +216,16 @@ SendResult sendSymbolsOnce(const IrSymbol* symbols, size_t count) {
 }
 
 SendResult sendSymbols(const IrSymbol* symbols, size_t count) {
-  for (uint8_t repeatIndex = 0; repeatIndex < kSendRepeats; ++repeatIndex) {
+  for (uint8_t repeatIndex = 0;
+       repeatIndex < replay_profile::kSendRepeats;
+       ++repeatIndex) {
     const SendResult result = sendSymbolsOnce(symbols, count);
     if (result != SendResult::kOk) {
       return result;
     }
 
-    if (repeatIndex + 1 < kSendRepeats) {
-      delay(kRepeatGapMs);
+    if (repeatIndex + 1 < replay_profile::kSendRepeats) {
+      delay(replay_profile::kRepeatGapMs);
     }
   }
 
@@ -303,7 +277,10 @@ void maybeFireShot() {
   g_lastRenderedSeconds = -1;
   setStatus("Sending...");
 
-  const SendResult result = sendSymbols(kInstantSymbols, kInstantSymbolCount);
+  const SendResult result = sendSymbols(
+      replay_profile::kInstantSymbols,
+      replay_profile::kInstantSymbolCount
+  );
   const bool sent = result == SendResult::kOk;
   playBeep(sent ? 2093.0f : 220.0f, sent ? 140 : 220);
 
@@ -353,8 +330,6 @@ void loop() {
   if (M5.BtnB.wasPressed()) {
     if (g_countdownActive) {
       cancelCountdown();
-    } else if (!kHasInstantCode) {
-      setStatus("No code");
     } else {
       startCountdown();
     }

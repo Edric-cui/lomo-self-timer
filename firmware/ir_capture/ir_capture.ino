@@ -174,7 +174,7 @@ void printSymbolsAsArray(size_t symbolCount) {
   Serial.println();
   Serial.printf("=== Capture %lu ===\n", static_cast<unsigned long>(captureIndex));
   Serial.printf("Symbol count: %u\n", static_cast<unsigned>(symbolCount));
-  Serial.println("// Paste into firmware/self_timer/self_timer.ino");
+  Serial.println("// Compare with firmware/common/replay_profile.h");
   Serial.printf("static const IrSymbol kLearnedCapture%lu[] = {\n", static_cast<unsigned long>(captureIndex));
 
   for (size_t i = 0; i < symbolCount; ++i) {

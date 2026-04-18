@@ -3,6 +3,7 @@
 .vscode/
 *.swp
 *.swo
+private/
 
 # Arduino / ESP32 build outputs
 build/
@@ -18,3 +19,4 @@ dist/
 
 # Local notes or experiment files
 *.log
+*.tmp

@@ -1,48 +1,48 @@
 # lomo-self-timer
 
-Battery-powered IR self-timer for the `Lomo'Instant Wide`, built around the `M5StickS3`.
+Battery-powered IR self-timer for the `Lomo'Instant Wide Glass`, built around
+the `M5StickS3`.
 
-The project goal is narrow on purpose:
+This repo stays intentionally narrow:
 
-- learn the IR signal from the original Lomo lens-cap remote
-- replay that signal after a local countdown to trigger the shutter
-- run fully offline on the M5StickS3 battery
+- learn timing clues from the original Lomo lens-cap remote
+- validate the TX path without spending film
+- replay a proven IR profile after a local countdown
+- run fully offline on the StickS3 battery
 
-## Current Status
+## What It Is
 
-**Camera trigger is confirmed working** as of 2026-04-18.
+`lomo-self-timer` is a small hardware-first firmware repo for Lomo users who
+want a self-timer without relying on a phone or network connection.
 
-- Proven payload: 24-symbol captured waveform at `38kHz`
-- Dual TX: both the built-in IR and external `U002` fire simultaneously
-- Effective range: approximately `15cm` (software-side optimizations exhausted; further range requires hardware changes)
-- See [docs/success_2026-04-18.md](docs/success_2026-04-18.md) for full details
+The current workflow is:
 
-## Hardware Target
+1. capture IR clues from the original remote
+2. validate TX behavior with diagnostics
+3. run the production self-timer with a proven replay profile
+
+## Validated Hardware Target
 
 - `M5StickS3`
-- `Lomo'Instant Wide` original IR lens-cap remote (for learning the signal)
-- `M5Stack IR Unit (U002)` connected via Grove adapter
+- `Lomo'Instant Wide Glass` used in the current confirmed test setup
+- original Lomo lens-cap IR remote for signal learning
+- optional `M5Stack IR Unit (U002)` via Grove adapter
 
-## U002 Pin Mapping
+The current confirmed trigger test was run on a `Wide Glass` body. Other
+`Lomo'Instant Wide` variants may behave similarly, but that has not been
+verified in this repo yet.
 
-> **Important:** The actual U002 pin mapping on the StickS3 Grove port is the
-> **reverse** of what the M5Stack datasheet implies.
+## Current Proven Result
 
-| Function | GPIO | Wire color (per datasheet) |
-|---|---|---|
-| IR TX (LED output) | `GPIO 9` | white |
-| IR RX (receiver input) | `GPIO 10` | yellow |
+Confirmed on `2026-04-18`:
 
-This was verified by a blind pin-sweep test. See [docs/success_2026-04-18.md](docs/success_2026-04-18.md).
+- proven replay profile: 24-symbol captured waveform at `38kHz`
+- output mode: dual TX with both the built-in emitter and `U002`
+- observed successful distance in the recorded test setup: approximately `40cm`
+- audio feedback: countdown beeps plus start/cancel/result tones
 
-## Current Interaction Model
-
-- `BtnA` tap: cycle delay (`3s`, `5s`, `10s`) while idle
-- `BtnA` long-press: switch primary IR backend label (`Built-in` / `U002`) while idle
-- `BtnB`: start countdown
-- `BtnB` during countdown: cancel
-
-With dual TX enabled (default), both emitters fire regardless of the UI label.
+See [validation notes](docs/validation-notes.md) for the recorded setup and
+measured behavior.
 
 ## Quick Start
 
@@ -50,56 +50,60 @@ With dual TX enabled (default), both emitters fire regardless of the UI label.
 2. Install the `M5Stack` board package and select `M5StickS3`.
 3. Install the `M5Unified` library.
 4. Upload `firmware/self_timer/self_timer.ino`.
-5. Aim the StickS3 at the camera's IR receiver at about `15cm`.
+5. Aim the StickS3 toward the camera's IR receiver at about `40cm`.
 6. Press `BtnB` to start the countdown.
 
-For the full bring-up walkthrough (capture → diagnostics → self-timer), see [docs/tutorial.md](docs/tutorial.md).
+If you are bringing up new hardware, start with
+[docs/setup.md](docs/setup.md) and then follow the full
+[tutorial](docs/tutorial.md).
 
 ## Repository Layout
 
 ```text
 .
 ├── docs/
-│   ├── setup.md                   # Hardware setup and workflows
-│   ├── success_2026-04-18.md      # Confirmed working config + pin discovery
-│   └── tutorial.md                # Full step-by-step bring-up guide
-└── firmware/
-    ├── backups/                   # Known-good firmware snapshots
+│   ├── release-checklist.md      # Publish gates for future feature releases
+│   ├── setup.md                  # Short hardware and toolchain reference
+│   ├── tutorial.md               # Full capture -> diagnostics -> sender flow
+│   └── validation-notes.md       # Confirmed working profile and test notes
+├── firmware/
     ├── common/
-    │   ├── ir_backend.h           # Pin mapping and backend selection
-    │   └── ir_frame.h             # IrSymbol data type
+    │   ├── ir_backend.h          # Pin mapping and backend preferences
+    │   ├── ir_frame.h            # Shared IrSymbol type
+    │   └── replay_profile.h      # Validated replay payload and send params
     ├── ir_capture/
-    │   └── ir_capture.ino         # Learn original remote signals
+    │   └── ir_capture.ino        # Capture timing clues from the original remote
     ├── ir_diagnostics/
-    │   └── ir_diagnostics.ino     # Zero-film hardware validation
+    │   └── ir_diagnostics.ino    # Zero-film TX/RX validation
     └── self_timer/
-        └── self_timer.ino         # Production countdown + trigger
+        └── self_timer.ino        # Production countdown + trigger path
+└── scripts/
+    └── release_check.sh          # Compile + privacy + release hygiene checks
 ```
 
-## Implementation Notes
+## Known Limitations
 
-- Primary target: M5StickS3
-- Dual TX mode fires both BuiltIn (GPIO 46) and U002 (GPIO 9) simultaneously
-- Carrier: `38kHz`, duty cycle `50%`, 5× repeat with `50ms` gap
-- The payload is a captured waveform from the original Lomo remote, not a synthesized protocol
-- Backend selection is done on-device and remembered across reboot
-- Diagnostics has independent persisted TX and RX backend selection
-- Diagnostics includes a `Sweep U002` mode for blind GPIO pin identification
+- The current public validation record is based on one confirmed `Lomo'Instant
+  Wide Glass` setup.
+- Other `Lomo'Instant Wide` variants may be applicable, but are still
+  unverified here.
+- The recorded successful distance is around `40cm` for that test setup, not a
+  universal guarantee.
+- Further distance improvement is expected to come from hardware changes, not
+  from more software tuning alone.
+- `arduino-cli` compile checks are documented and were validated locally for
+  the current three-sketch workflow, but hardware flashing and on-device
+  behavior still need real device verification.
 
-## Milestones
+## Next Improvements
 
-- `M0`: ✅ toolchain boots, screen works, buttons work
-- `M1`: ✅ raw capture from the original remote yields repeatable timing clues
-- `M2`: ✅ diagnostics prove TX paths emit IR visible to phone camera
-- `M3`: ✅ captured waveform replay triggers the camera
-- `M4`: ✅ countdown UX is usable on battery power with audio feedback
-- `M5`: learned code persistence and optional TIME/Bulb support (future)
+- factor the remaining shared RMT TX helpers out of `ir_diagnostics` and
+  `self_timer`
+- add a cleaner path for swapping replay profiles without editing the sender
+  logic directly
+- validate whether the same profile works unchanged on other `Wide` variants
+- improve range through hardware changes such as a stronger emitter or driver
 
-## Notes
-
-- The StickS3 built-in IR path needs `EXT_5V` enabled.
-- StickS3 IR receive should use the ESP32 `RMT` peripheral.
-- StickS3 IR receive conflicts with the internal speaker amplifier, so the capture sketch disables it.
-- U002 uses a `38kHz` hardware-demodulating receiver; not ideal for capture of remotes on other frequencies.
-- U002 loopback tests always time out because the TX LED and RX sensor face the same direction on the module — this is expected, not a fault.
-- The recommended validation order is `capture → diagnostics → self_timer`, not direct camera testing after capture.
+For future feature work such as `Bulb Control`, use
+[docs/release-checklist.md](docs/release-checklist.md) together with
+`scripts/release_check.sh` before publishing.
