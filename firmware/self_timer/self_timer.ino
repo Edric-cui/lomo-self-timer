@@ -9,7 +9,7 @@
 namespace {
 
 constexpr uint32_t kRmtResolutionHz = 1000000;
-constexpr uint8_t kSpeakerVolume = 192;
+constexpr uint8_t kSpeakerVolume = 255;
 constexpr bool kEnableDebugBeeps = true;
 
 constexpr uint8_t kDelayOptionsSeconds[] = {3, 5, 10, 15, 20};
@@ -58,11 +58,11 @@ void playCountdownBeep(int remainingSeconds) {
   // Split the countdown into long / medium / final phases so the user can
   // hear roughly how much setup time remains without looking at the screen.
   if (remainingSeconds <= 10) {
-    playBeep(1046.5f, 70);
+    playBeep(1046.5f, 110);
     return;
   }
 
-  playBeep(784.0f, 55);
+  playBeep(784.0f, 95);
 }
 
 void drawScreen() {
