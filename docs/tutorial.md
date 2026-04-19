@@ -104,9 +104,10 @@ The production sketch uses the shared profile in
 
 Current self-timer controls:
 
-- `BtnA`: cycle delay (`3s`, `5s`, `10s`, `15s`, `20s`) while idle
-- `BtnB`: start countdown
-- `BtnB` during countdown: cancel
+- `BtnA` (hold): toggle between Shot Mode and Bulb Mode
+- `BtnA` (click): cycle delay (`3s`, `5s`, `10s`, `15s`, `20s`) or exposure time
+- `BtnB`: start countdown or trigger action
+- `BtnB` during action: cancel or stop early
 
 The production sender does not expose backend switching on-device. Dual TX is
 the fixed production behavior in the current repo.

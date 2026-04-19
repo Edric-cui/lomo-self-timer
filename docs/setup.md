@@ -70,8 +70,7 @@ This is the reverse of what the M5Stack U002 datasheet suggests. See
   Validates TX and RX behavior without spending film. TX and RX backends are
   selected independently and persisted.
 - `firmware/self_timer/self_timer.ino`
-  Production sender. `BtnA` cycles delay, `BtnB` starts or cancels the
-  countdown, and dual TX is always enabled in the current production path.
+  Production sender. `BtnA` click cycles timer/exposure delay, `BtnA` hold toggles Shot/Bulb mode. `BtnB` starts/stops action. Dual TX is always enabled.
 
 ## Validated Replay Profile
 

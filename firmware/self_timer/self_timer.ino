@@ -249,46 +249,46 @@ void drawScreen() {
         M5.Display.println("St:Ready");
       }
       M5.Display.println(g_triggerMode == TriggerMode::Shot ?
-          "A tap delay" : "A tap exp");
+          "BtnA tap delay" : "BtnA tap exp");
       if (g_triggerMode == TriggerMode::Shot) {
-        M5.Display.println(bulbProfileReady() ? "A hold BULB" : "A hold ignored");
+        M5.Display.println(bulbProfileReady() ? "BtnA hold BULB" : "BtnA ignored");
       } else {
-        M5.Display.println("A hold SHOT");
+        M5.Display.println("BtnA hold SHOT");
       }
-      M5.Display.println("B start");
+      M5.Display.println("BtnB start");
       break;
     case RuntimeState::Countdown:
       M5.Display.printf("Go:%ds\n", countdownRemainingSeconds());
       M5.Display.println("St:Counting");
-      M5.Display.println("A ignored");
-      M5.Display.println("B cancel");
+      M5.Display.println("BtnA ignored");
+      M5.Display.println("BtnB cancel");
       break;
     case RuntimeState::SendingShot:
       M5.Display.println("Go:0s");
       M5.Display.println("St:Shot send");
-      M5.Display.println("Btns ignored");
+      M5.Display.println("BtnA/B ignored");
       break;
     case RuntimeState::BulbOpening:
       M5.Display.println("Go:0s");
       M5.Display.println("St:Open send");
-      M5.Display.println("Btns ignored");
+      M5.Display.println("BtnA/B ignored");
       break;
     case RuntimeState::BulbOpen: {
       char elapsedLabel[16];
       formatDurationMs(displayBulbElapsedMs(), elapsedLabel, sizeof(elapsedLabel));
       M5.Display.printf("Open:%s\n", elapsedLabel);
       M5.Display.println("St:Presumed");
-      M5.Display.println("A ignored");
-      M5.Display.println("B close");
+      M5.Display.println("BtnA ignored");
+      M5.Display.println("BtnB close");
       break;
     }
     case RuntimeState::BulbClosing:
       M5.Display.println("St:Close send");
-      M5.Display.println("Btns ignored");
+      M5.Display.println("BtnA/B ignored");
       break;
     case RuntimeState::Error:
       M5.Display.printf("Err:%s\n", errorReasonLabel(g_errorReason));
-      M5.Display.println("St:reset A/B");
+      M5.Display.println("St:reset BtnA/B");
       M5.Display.println("Boot -> SHOT");
       break;
   }
