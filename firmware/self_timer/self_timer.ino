@@ -1,7 +1,7 @@
 #include <M5Unified.h>
 #include "driver/rmt_common.h"
-#include "driver/rmt_tx.h"
 #include "driver/rmt_encoder.h"
+#include "driver/rmt_tx.h"
 #include "../common/ir_backend.h"
 #include "../common/ir_frame.h"
 #include "../common/replay_profile.h"
@@ -11,18 +11,32 @@ namespace {
 constexpr uint32_t kRmtResolutionHz = 1000000;
 constexpr uint8_t kSpeakerVolume = 255;
 constexpr bool kEnableDebugBeeps = true;
+constexpr uint32_t kBulbSafetyTimeoutMs = 120000;
+constexpr uint8_t kBulbOpenRetries = 1;
+constexpr uint8_t kBulbCloseRetries = 2;
 
 constexpr uint8_t kDelayOptionsSeconds[] = {3, 5, 10, 15, 20};
-size_t g_delayIndex = 0;
-bool g_countdownActive = false;
-uint32_t g_countdownEndMs = 0;
-int g_lastRenderedSeconds = -1;
-String g_status = "Ready";
 
-rmt_channel_handle_t g_txChannel = nullptr;
-rmt_encoder_handle_t g_copyEncoder = nullptr;
-rmt_channel_handle_t g_txChannel2 = nullptr;
-rmt_encoder_handle_t g_copyEncoder2 = nullptr;
+enum class TriggerMode : uint8_t {
+  Shot = 0,
+  Bulb = 1,
+};
+
+enum class RuntimeState : uint8_t {
+  Idle = 0,
+  Countdown = 1,
+  SendingShot = 2,
+  BulbOpening = 3,
+  BulbOpen = 4,
+  BulbClosing = 5,
+  Error = 6,
+};
+
+enum class ErrorReason : uint8_t {
+  None = 0,
+  OpenFailed = 1,
+  CloseFailed = 2,
+};
 
 enum class SendResult {
   kOk,
@@ -30,6 +44,54 @@ enum class SendResult {
   kTooLong,
   kTransmitError,
 };
+
+size_t g_delayIndex = 0;
+TriggerMode g_triggerMode = TriggerMode::Shot;
+RuntimeState g_runtimeState = RuntimeState::Idle;
+ErrorReason g_errorReason = ErrorReason::None;
+uint32_t g_countdownEndMs = 0;
+uint32_t g_bulbOpenedAtMs = 0;
+int g_lastRenderedCountdownSeconds = -1;
+int g_lastRenderedElapsedSeconds = -1;
+
+rmt_channel_handle_t g_txChannel = nullptr;
+rmt_encoder_handle_t g_copyEncoder = nullptr;
+rmt_channel_handle_t g_txChannel2 = nullptr;
+rmt_encoder_handle_t g_copyEncoder2 = nullptr;
+
+const char* triggerModeLabel(TriggerMode mode) {
+  switch (mode) {
+    case TriggerMode::Shot:
+      return "SHOT";
+    case TriggerMode::Bulb:
+      return "BULB";
+  }
+
+  return "?";
+}
+
+const char* errorReasonLabel(ErrorReason reason) {
+  switch (reason) {
+    case ErrorReason::None:
+      return "-";
+    case ErrorReason::OpenFailed:
+      return "open fail";
+    case ErrorReason::CloseFailed:
+      return "close fail";
+  }
+
+  return "?";
+}
+
+bool bulbProfileReady() {
+  const replay_profile::ReplayFrame openFrame = replay_profile::bulbOpenFrame();
+  const replay_profile::ReplayFrame closeFrame = replay_profile::bulbCloseFrame();
+  return replay_profile::kHasValidatedBulbProfile &&
+      openFrame.symbols != nullptr &&
+      openFrame.count > 0 &&
+      closeFrame.symbols != nullptr &&
+      closeFrame.count > 0;
+}
 
 void playBeep(float frequencyHz, uint32_t durationMs) {
   if (!kEnableDebugBeeps) {
@@ -44,8 +106,6 @@ void playCountdownBeep(int remainingSeconds) {
     return;
   }
 
-  // Skip the final countdown beep so the last audible cue does not overlap
-  // with the IR trigger moment.
   if (remainingSeconds == 1) {
     return;
   }
@@ -55,8 +115,6 @@ void playCountdownBeep(int remainingSeconds) {
     return;
   }
 
-  // Split the countdown into long / medium / final phases so the user can
-  // hear roughly how much setup time remains without looking at the screen.
   if (remainingSeconds <= 10) {
     playBeep(1046.5f, 110);
     return;
@@ -65,40 +123,113 @@ void playCountdownBeep(int remainingSeconds) {
   playBeep(784.0f, 95);
 }
 
+void playStartTone() {
+  playBeep(1318.5f, 90);
+}
+
+void playCancelTone() {
+  playBeep(440.0f, 140);
+}
+
+void playShotSuccessTone() {
+  playBeep(2093.0f, 140);
+}
+
+void playSendFailureTone() {
+  playBeep(220.0f, 220);
+}
+
+void playBulbOpenTone() {
+  playBeep(1568.0f, 120);
+}
+
+void playBulbCloseTone() {
+  playBeep(1174.0f, 140);
+}
+
+void playLatchedErrorAlarm() {
+  playBeep(330.0f, 180);
+  delay(60);
+  playBeep(262.0f, 220);
+}
+
+uint32_t countdownRemainingMs() {
+  const uint32_t now = millis();
+  return (g_countdownEndMs > now) ? (g_countdownEndMs - now) : 0;
+}
+
+int countdownRemainingSeconds() {
+  return static_cast<int>((countdownRemainingMs() + 999) / 1000);
+}
+
+int bulbElapsedSeconds() {
+  if (g_bulbOpenedAtMs == 0) {
+    return 0;
+  }
+
+  return static_cast<int>((millis() - g_bulbOpenedAtMs) / 1000UL);
+}
+
 void drawScreen() {
   M5.Display.clear();
   M5.Display.setCursor(0, 0);
   M5.Display.println("Lomo Timer");
-  M5.Display.printf("Dly:%us IR:Dual\n",
-                    kDelayOptionsSeconds[g_delayIndex]);
-  M5.Display.println("Code:Ready");
+  M5.Display.printf("Mode:%s\n", triggerModeLabel(g_triggerMode));
+  M5.Display.printf("Dly:%us IR:Dual\n", kDelayOptionsSeconds[g_delayIndex]);
 
-  if (g_countdownActive) {
-    const uint32_t now = millis();
-    const uint32_t remainingMs =
-        (g_countdownEndMs > now) ? (g_countdownEndMs - now) : 0;
-    const uint32_t remainingSeconds = (remainingMs + 999) / 1000;
-    M5.Display.printf("Go:%lus\n", static_cast<unsigned long>(remainingSeconds));
-  } else {
-    M5.Display.println("Go:-");
-  }
-
-  M5.Display.printf("St:%s\n", g_status.c_str());
-  if (g_countdownActive) {
-    M5.Display.println("A lock");
-    M5.Display.println("B cancel");
-  } else {
-    M5.Display.println("A tap delay");
-    M5.Display.println("B start");
+  switch (g_runtimeState) {
+    case RuntimeState::Idle:
+      M5.Display.println("Go:-");
+      if (g_triggerMode == TriggerMode::Shot && !bulbProfileReady()) {
+        M5.Display.println("St:Bulb locked");
+      } else {
+        M5.Display.println("St:Ready");
+      }
+      M5.Display.println("A tap delay");
+      if (g_triggerMode == TriggerMode::Shot) {
+        M5.Display.println(bulbProfileReady() ? "A hold bulb" : "A hold lock");
+      } else {
+        M5.Display.println("A hold shot");
+      }
+      M5.Display.println("B start");
+      break;
+    case RuntimeState::Countdown:
+      M5.Display.printf("Go:%ds\n", countdownRemainingSeconds());
+      M5.Display.println("St:Counting");
+      M5.Display.println("A lock");
+      M5.Display.println("B cancel");
+      break;
+    case RuntimeState::SendingShot:
+      M5.Display.println("Go:0s");
+      M5.Display.println("St:Shot send");
+      M5.Display.println("Buttons lock");
+      break;
+    case RuntimeState::BulbOpening:
+      M5.Display.println("Go:0s");
+      M5.Display.println("St:Open send");
+      M5.Display.println("Buttons lock");
+      break;
+    case RuntimeState::BulbOpen:
+      M5.Display.printf("Open:%ds\n", bulbElapsedSeconds());
+      M5.Display.println("St:Presumed");
+      M5.Display.println("A lock");
+      M5.Display.println("B close");
+      break;
+    case RuntimeState::BulbClosing:
+      M5.Display.printf("Open:%ds\n", bulbElapsedSeconds());
+      M5.Display.println("St:Close send");
+      M5.Display.println("Buttons lock");
+      break;
+    case RuntimeState::Error:
+      M5.Display.printf("Err:%s\n", errorReasonLabel(g_errorReason));
+      M5.Display.println("St:A/B reset");
+      M5.Display.println("Boot -> Shot");
+      break;
   }
 }
 
-void setStatus(const String& status) {
-  g_status = status;
-  drawScreen();
-}
-
-void setupOneChannel(gpio_num_t pin, rmt_channel_handle_t* channel,
+void setupOneChannel(gpio_num_t pin,
+                     rmt_channel_handle_t* channel,
                      rmt_encoder_handle_t* encoder) {
   rmt_tx_channel_config_t channelConfig = {};
   channelConfig.gpio_num = pin;
@@ -151,13 +282,8 @@ void teardownTransmitter() {
   teardownOneChannel(&g_txChannel2, &g_copyEncoder2);
 }
 
-void recreateTransmitter() {
-  teardownTransmitter();
-  setupTransmitter();
-}
-
 SendResult sendSymbolsOnce(const IrSymbol* symbols, size_t count) {
-  if (count == 0) {
+  if (count == 0 || symbols == nullptr) {
     return SendResult::kInvalid;
   }
 
@@ -166,10 +292,7 @@ SendResult sendSymbolsOnce(const IrSymbol* symbols, size_t count) {
   }
 
   rmt_symbol_word_t encoded[kMaxReplaySymbols];
-
   for (size_t i = 0; i < count; ++i) {
-    // Demodulating IR receivers typically output active-low pulses, so the
-    // captured levels need to be inverted before driving the carrier LED.
     encoded[i].level0 = symbols[i].level0 ? 0 : 1;
     encoded[i].duration0 = symbols[i].duration0;
     encoded[i].level1 = symbols[i].level1 ? 0 : 1;
@@ -182,7 +305,6 @@ SendResult sendSymbolsOnce(const IrSymbol* symbols, size_t count) {
 
   const size_t byteCount = count * sizeof(rmt_symbol_word_t);
 
-  // Fire primary TX channel
   esp_err_t result = rmt_transmit(
       g_txChannel,
       g_copyEncoder,
@@ -190,29 +312,40 @@ SendResult sendSymbolsOnce(const IrSymbol* symbols, size_t count) {
       byteCount,
       &transmitConfig
   );
-
   if (result != ESP_OK) {
+    Serial.printf("Primary TX start failed: %d\n", static_cast<int>(result));
     return SendResult::kTransmitError;
   }
 
-  // Fire secondary TX channel simultaneously
   if (g_txChannel2 != nullptr) {
-    rmt_transmit(
+    const esp_err_t secondaryResult = rmt_transmit(
         g_txChannel2,
         g_copyEncoder2,
         encoded,
         byteCount,
         &transmitConfig
     );
-    // Best-effort: don't fail the whole send if secondary has issues
+    if (secondaryResult != ESP_OK) {
+      Serial.printf("Secondary TX start failed: %d\n",
+                    static_cast<int>(secondaryResult));
+    }
   }
 
   result = rmt_tx_wait_all_done(g_txChannel, 1000);
-  if (g_txChannel2 != nullptr) {
-    rmt_tx_wait_all_done(g_txChannel2, 1000);
+  if (result != ESP_OK) {
+    Serial.printf("Primary TX wait failed: %d\n", static_cast<int>(result));
+    return SendResult::kTransmitError;
   }
 
-  return (result == ESP_OK) ? SendResult::kOk : SendResult::kTransmitError;
+  if (g_txChannel2 != nullptr) {
+    const esp_err_t secondaryWait = rmt_tx_wait_all_done(g_txChannel2, 1000);
+    if (secondaryWait != ESP_OK) {
+      Serial.printf("Secondary TX wait failed: %d\n",
+                    static_cast<int>(secondaryWait));
+    }
+  }
+
+  return SendResult::kOk;
 }
 
 SendResult sendSymbols(const IrSymbol* symbols, size_t count) {
@@ -232,71 +365,212 @@ SendResult sendSymbols(const IrSymbol* symbols, size_t count) {
   return SendResult::kOk;
 }
 
+SendResult sendFrame(const replay_profile::ReplayFrame& frame) {
+  return sendSymbols(frame.symbols, frame.count);
+}
+
+SendResult sendFrameWithRetries(const replay_profile::ReplayFrame& frame,
+                                uint8_t additionalRetries) {
+  SendResult result = SendResult::kInvalid;
+  for (uint8_t attempt = 0; attempt <= additionalRetries; ++attempt) {
+    result = sendFrame(frame);
+    if (result == SendResult::kOk) {
+      return result;
+    }
+
+    if (attempt < additionalRetries) {
+      delay(80);
+    }
+  }
+
+  return result;
+}
+
+void resetTimers() {
+  g_countdownEndMs = 0;
+  g_bulbOpenedAtMs = 0;
+  g_lastRenderedCountdownSeconds = -1;
+  g_lastRenderedElapsedSeconds = -1;
+}
+
+void enterIdle(TriggerMode mode) {
+  g_triggerMode = mode;
+  g_runtimeState = RuntimeState::Idle;
+  g_errorReason = ErrorReason::None;
+  resetTimers();
+  drawScreen();
+}
+
+void enterError(ErrorReason reason) {
+  g_runtimeState = RuntimeState::Error;
+  g_errorReason = reason;
+  resetTimers();
+  drawScreen();
+  playLatchedErrorAlarm();
+}
+
+void cycleDelay() {
+  g_delayIndex = (g_delayIndex + 1) %
+      (sizeof(kDelayOptionsSeconds) / sizeof(kDelayOptionsSeconds[0]));
+  drawScreen();
+}
+
+void toggleTriggerMode() {
+  if (g_triggerMode == TriggerMode::Shot) {
+    if (!bulbProfileReady()) {
+      playSendFailureTone();
+      drawScreen();
+      return;
+    }
+    g_triggerMode = TriggerMode::Bulb;
+  } else {
+    g_triggerMode = TriggerMode::Shot;
+  }
+
+  drawScreen();
+}
+
 void startCountdown() {
-  g_countdownActive = true;
+  g_runtimeState = RuntimeState::Countdown;
+  g_errorReason = ErrorReason::None;
   g_countdownEndMs = millis() + (kDelayOptionsSeconds[g_delayIndex] * 1000UL);
-  g_lastRenderedSeconds = -1;
-  playBeep(1318.5f, 90);
-  setStatus("Counting down");
+  g_lastRenderedCountdownSeconds = -1;
+  g_lastRenderedElapsedSeconds = -1;
+  playStartTone();
+  drawScreen();
 }
 
 void cancelCountdown() {
-  g_countdownActive = false;
-  g_lastRenderedSeconds = -1;
-  playBeep(440.0f, 140);
-  setStatus("Cancelled");
+  playCancelTone();
+  enterIdle(g_triggerMode);
 }
 
-void maybeRenderCountdownTick() {
-  if (!g_countdownActive) {
+void runShotSend() {
+  g_runtimeState = RuntimeState::SendingShot;
+  drawScreen();
+
+  const SendResult result = sendFrame(replay_profile::kInstantFrame);
+  if (result == SendResult::kOk) {
+    playShotSuccessTone();
+  } else {
+    playSendFailureTone();
+  }
+
+  enterIdle(TriggerMode::Shot);
+}
+
+void runBulbOpen() {
+  g_runtimeState = RuntimeState::BulbOpening;
+  drawScreen();
+
+  const SendResult result = sendFrameWithRetries(replay_profile::bulbOpenFrame(),
+                                                 kBulbOpenRetries);
+  if (result != SendResult::kOk) {
+    enterError(ErrorReason::OpenFailed);
     return;
   }
 
-  const uint32_t now = millis();
-  const uint32_t remainingMs =
-      (g_countdownEndMs > now) ? (g_countdownEndMs - now) : 0;
-  const int remainingSeconds = static_cast<int>((remainingMs + 999) / 1000);
+  g_runtimeState = RuntimeState::BulbOpen;
+  g_errorReason = ErrorReason::None;
+  g_countdownEndMs = 0;
+  g_bulbOpenedAtMs = millis();
+  g_lastRenderedElapsedSeconds = -1;
+  playBulbOpenTone();
+  drawScreen();
+}
 
-  if (remainingSeconds != g_lastRenderedSeconds) {
-    g_lastRenderedSeconds = remainingSeconds;
+void runBulbClose() {
+  g_runtimeState = RuntimeState::BulbClosing;
+  drawScreen();
+
+  const SendResult result = sendFrameWithRetries(replay_profile::bulbCloseFrame(),
+                                                 kBulbCloseRetries);
+  if (result != SendResult::kOk) {
+    enterError(ErrorReason::CloseFailed);
+    return;
+  }
+
+  playBulbCloseTone();
+  enterIdle(TriggerMode::Bulb);
+}
+
+void maybeRenderCountdownTick() {
+  if (g_runtimeState != RuntimeState::Countdown) {
+    return;
+  }
+
+  const int remainingSeconds = countdownRemainingSeconds();
+  if (remainingSeconds != g_lastRenderedCountdownSeconds) {
+    g_lastRenderedCountdownSeconds = remainingSeconds;
     playCountdownBeep(remainingSeconds);
     drawScreen();
   }
 }
 
-void maybeFireShot() {
-  if (!g_countdownActive) {
+void maybeRenderBulbElapsedTick() {
+  if (g_runtimeState != RuntimeState::BulbOpen) {
     return;
   }
 
-  if (millis() < g_countdownEndMs) {
+  const int elapsedSeconds = bulbElapsedSeconds();
+  if (elapsedSeconds != g_lastRenderedElapsedSeconds) {
+    g_lastRenderedElapsedSeconds = elapsedSeconds;
+    drawScreen();
+  }
+}
+
+void advanceRuntime() {
+  if (g_runtimeState == RuntimeState::Countdown &&
+      millis() >= g_countdownEndMs) {
+    if (g_triggerMode == TriggerMode::Shot) {
+      runShotSend();
+    } else {
+      runBulbOpen();
+    }
     return;
   }
 
-  g_countdownActive = false;
-  g_lastRenderedSeconds = -1;
-  setStatus("Sending...");
+  if (g_runtimeState == RuntimeState::BulbOpen &&
+      (millis() - g_bulbOpenedAtMs) >= kBulbSafetyTimeoutMs) {
+    runBulbClose();
+  }
+}
 
-  const SendResult result = sendSymbols(
-      replay_profile::kInstantSymbols,
-      replay_profile::kInstantSymbolCount
-  );
-  const bool sent = result == SendResult::kOk;
-  playBeep(sent ? 2093.0f : 220.0f, sent ? 140 : 220);
+void handleButtons() {
+  if (g_runtimeState == RuntimeState::Idle) {
+    if (M5.BtnA.wasHold()) {
+      toggleTriggerMode();
+      return;
+    }
 
-  switch (result) {
-    case SendResult::kOk:
-      setStatus("Done");
-      break;
-    case SendResult::kTooLong:
-      setStatus("Code too long");
-      break;
-    case SendResult::kInvalid:
-      setStatus("Code invalid");
-      break;
-    case SendResult::kTransmitError:
-      setStatus("Send failed");
-      break;
+    if (M5.BtnA.wasClicked()) {
+      cycleDelay();
+    }
+
+    if (M5.BtnB.wasPressed()) {
+      startCountdown();
+    }
+    return;
+  }
+
+  if (g_runtimeState == RuntimeState::Countdown) {
+    if (M5.BtnB.wasPressed()) {
+      cancelCountdown();
+    }
+    return;
+  }
+
+  if (g_runtimeState == RuntimeState::BulbOpen) {
+    if (M5.BtnB.wasPressed()) {
+      runBulbClose();
+    }
+    return;
+  }
+
+  if (g_runtimeState == RuntimeState::Error) {
+    if (M5.BtnA.wasPressed() || M5.BtnB.wasPressed()) {
+      enterIdle(TriggerMode::Shot);
+    }
   }
 }
 
@@ -307,6 +581,7 @@ void setup() {
   config.internal_spk = kEnableDebugBeeps;
   M5.begin(config);
 
+  Serial.begin(115200);
   M5.Power.setExtOutput(true);
   M5.Display.setRotation(3);
   M5.Display.setTextSize(2);
@@ -315,27 +590,14 @@ void setup() {
   }
 
   setupTransmitter();
-  drawScreen();
+  enterIdle(TriggerMode::Shot);
 }
 
 void loop() {
   M5.update();
-
-  if (!g_countdownActive && M5.BtnA.wasClicked()) {
-    g_delayIndex = (g_delayIndex + 1) %
-        (sizeof(kDelayOptionsSeconds) / sizeof(kDelayOptionsSeconds[0]));
-    setStatus("Delay updated");
-  }
-
-  if (M5.BtnB.wasPressed()) {
-    if (g_countdownActive) {
-      cancelCountdown();
-    } else {
-      startCountdown();
-    }
-  }
-
+  handleButtons();
   maybeRenderCountdownTick();
-  maybeFireShot();
+  maybeRenderBulbElapsedTick();
+  advanceRuntime();
   delay(10);
 }

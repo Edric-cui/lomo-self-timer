@@ -6,6 +6,11 @@
 
 namespace replay_profile {
 
+struct ReplayFrame {
+  const IrSymbol* symbols;
+  size_t count;
+};
+
 constexpr uint32_t kCarrierFrequencyHz = 38000;
 constexpr float kCarrierDutyCycle = 0.50f;
 constexpr uint8_t kSendRepeats = 5;
@@ -41,5 +46,20 @@ static const IrSymbol kInstantSymbols[] = {
 
 constexpr size_t kInstantSymbolCount =
     sizeof(kInstantSymbols) / sizeof(kInstantSymbols[0]);
+
+constexpr ReplayFrame kInstantFrame = {kInstantSymbols, kInstantSymbolCount};
+
+// Bulb remains locked until the TIME button waveform is captured, classified,
+// and validated on an empty camera body. Do not replace these placeholders with
+// speculative arrays.
+constexpr bool kHasValidatedBulbProfile = false;
+
+inline ReplayFrame bulbOpenFrame() {
+  return {nullptr, 0};
+}
+
+inline ReplayFrame bulbCloseFrame() {
+  return {nullptr, 0};
+}
 
 }  // namespace replay_profile
