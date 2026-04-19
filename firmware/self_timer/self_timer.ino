@@ -11,11 +11,15 @@ namespace {
 constexpr uint32_t kRmtResolutionHz = 1000000;
 constexpr uint8_t kSpeakerVolume = 255;
 constexpr bool kEnableDebugBeeps = true;
-constexpr uint32_t kBulbSafetyTimeoutMs = 120000;
+constexpr uint32_t kBulbCountdownMs = 3000;
 constexpr uint8_t kBulbOpenRetries = 1;
 constexpr uint8_t kBulbCloseRetries = 2;
+constexpr uint32_t kElapsedRenderStepMs = 250;
 
-constexpr uint8_t kDelayOptionsSeconds[] = {3, 5, 10, 15, 20};
+constexpr uint8_t kShotCountdownOptionsSeconds[] = {3, 5, 10, 15, 20};
+constexpr uint32_t kBulbExposureOptionsMs[] = {
+    500, 750, 1000, 1250, 1500, 2000, 3000, 4000, 8000, 15000, 28000
+};
 
 enum class TriggerMode : uint8_t {
   Shot = 0,
@@ -45,14 +49,16 @@ enum class SendResult {
   kTransmitError,
 };
 
-size_t g_delayIndex = 0;
+size_t g_shotDelayIndex = 0;
+size_t g_bulbExposureIndex = 0;
 TriggerMode g_triggerMode = TriggerMode::Shot;
 RuntimeState g_runtimeState = RuntimeState::Idle;
 ErrorReason g_errorReason = ErrorReason::None;
 uint32_t g_countdownEndMs = 0;
 uint32_t g_bulbOpenedAtMs = 0;
+uint32_t g_bulbCloseDeadlineMs = 0;
 int g_lastRenderedCountdownSeconds = -1;
-int g_lastRenderedElapsedSeconds = -1;
+int g_lastRenderedElapsedBucket = -1;
 
 rmt_channel_handle_t g_txChannel = nullptr;
 rmt_encoder_handle_t g_copyEncoder = nullptr;
@@ -83,10 +89,64 @@ const char* errorReasonLabel(ErrorReason reason) {
   return "?";
 }
 
+uint8_t currentShotCountdownSeconds() {
+  return kShotCountdownOptionsSeconds[g_shotDelayIndex];
+}
+
+uint32_t currentBulbExposureMs() {
+  return kBulbExposureOptionsMs[g_bulbExposureIndex];
+}
+
+uint32_t currentCountdownDurationMs() {
+  if (g_triggerMode == TriggerMode::Bulb) {
+    return kBulbCountdownMs;
+  }
+
+  return static_cast<uint32_t>(currentShotCountdownSeconds()) * 1000UL;
+}
+
+void formatDurationMs(uint32_t durationMs, char* buffer, size_t bufferSize) {
+  const unsigned long wholeSeconds = durationMs / 1000UL;
+  const uint32_t fractionalMs = durationMs % 1000UL;
+
+  if (fractionalMs == 0) {
+    snprintf(buffer, bufferSize, "%lus", wholeSeconds);
+    return;
+  }
+
+  if (fractionalMs == 250) {
+    snprintf(buffer, bufferSize, "%lu.25s", wholeSeconds);
+    return;
+  }
+
+  if (fractionalMs == 500) {
+    snprintf(buffer, bufferSize, "%lu.5s", wholeSeconds);
+    return;
+  }
+
+  if (fractionalMs == 750) {
+    snprintf(buffer, bufferSize, "%lu.75s", wholeSeconds);
+    return;
+  }
+
+  snprintf(buffer, bufferSize, "%lu.%03lus", wholeSeconds, fractionalMs);
+}
+
+void printCurrentPresetLine() {
+  if (g_triggerMode == TriggerMode::Shot) {
+    M5.Display.printf("Dly:%us IR:Dual\n", currentShotCountdownSeconds());
+    return;
+  }
+
+  char exposureLabel[16];
+  formatDurationMs(currentBulbExposureMs(), exposureLabel, sizeof(exposureLabel));
+  M5.Display.printf("Exp:%s IR:Dual\n", exposureLabel);
+}
+
 bool bulbProfileReady() {
   const replay_profile::ReplayFrame openFrame = replay_profile::bulbOpenFrame();
   const replay_profile::ReplayFrame closeFrame = replay_profile::bulbCloseFrame();
-  return replay_profile::kHasValidatedBulbProfile &&
+  return replay_profile::kHasBulbCandidateProfile &&
       openFrame.symbols != nullptr &&
       openFrame.count > 0 &&
       closeFrame.symbols != nullptr &&
@@ -159,15 +219,19 @@ uint32_t countdownRemainingMs() {
 }
 
 int countdownRemainingSeconds() {
-  return static_cast<int>((countdownRemainingMs() + 999) / 1000);
+  return static_cast<int>((countdownRemainingMs() + 999) / 1000UL);
 }
 
-int bulbElapsedSeconds() {
+uint32_t bulbElapsedMs() {
   if (g_bulbOpenedAtMs == 0) {
     return 0;
   }
 
-  return static_cast<int>((millis() - g_bulbOpenedAtMs) / 1000UL);
+  return millis() - g_bulbOpenedAtMs;
+}
+
+uint32_t displayBulbElapsedMs() {
+  return (bulbElapsedMs() / kElapsedRenderStepMs) * kElapsedRenderStepMs;
 }
 
 void drawScreen() {
@@ -175,17 +239,17 @@ void drawScreen() {
   M5.Display.setCursor(0, 0);
   M5.Display.println("Lomo Timer");
   M5.Display.printf("Mode:%s\n", triggerModeLabel(g_triggerMode));
-  M5.Display.printf("Dly:%us IR:Dual\n", kDelayOptionsSeconds[g_delayIndex]);
+  printCurrentPresetLine();
 
   switch (g_runtimeState) {
     case RuntimeState::Idle:
-      M5.Display.println("Go:-");
       if (g_triggerMode == TriggerMode::Shot && !bulbProfileReady()) {
         M5.Display.println("St:Bulb locked");
       } else {
         M5.Display.println("St:Ready");
       }
-      M5.Display.println("A tap delay");
+      M5.Display.println(g_triggerMode == TriggerMode::Shot ?
+          "A tap delay" : "A tap exp");
       if (g_triggerMode == TriggerMode::Shot) {
         M5.Display.println(bulbProfileReady() ? "A hold bulb" : "A hold lock");
       } else {
@@ -209,14 +273,16 @@ void drawScreen() {
       M5.Display.println("St:Open send");
       M5.Display.println("Buttons lock");
       break;
-    case RuntimeState::BulbOpen:
-      M5.Display.printf("Open:%ds\n", bulbElapsedSeconds());
+    case RuntimeState::BulbOpen: {
+      char elapsedLabel[16];
+      formatDurationMs(displayBulbElapsedMs(), elapsedLabel, sizeof(elapsedLabel));
+      M5.Display.printf("Open:%s\n", elapsedLabel);
       M5.Display.println("St:Presumed");
       M5.Display.println("A lock");
       M5.Display.println("B close");
       break;
+    }
     case RuntimeState::BulbClosing:
-      M5.Display.printf("Open:%ds\n", bulbElapsedSeconds());
       M5.Display.println("St:Close send");
       M5.Display.println("Buttons lock");
       break;
@@ -348,16 +414,18 @@ SendResult sendSymbolsOnce(const IrSymbol* symbols, size_t count) {
   return SendResult::kOk;
 }
 
-SendResult sendSymbols(const IrSymbol* symbols, size_t count) {
+SendResult sendSymbols(const IrSymbol* symbols,
+                       size_t count,
+                       uint8_t repeatCount) {
   for (uint8_t repeatIndex = 0;
-       repeatIndex < replay_profile::kSendRepeats;
+       repeatIndex < repeatCount;
        ++repeatIndex) {
     const SendResult result = sendSymbolsOnce(symbols, count);
     if (result != SendResult::kOk) {
       return result;
     }
 
-    if (repeatIndex + 1 < replay_profile::kSendRepeats) {
+    if (repeatIndex + 1 < repeatCount) {
       delay(replay_profile::kRepeatGapMs);
     }
   }
@@ -365,15 +433,17 @@ SendResult sendSymbols(const IrSymbol* symbols, size_t count) {
   return SendResult::kOk;
 }
 
-SendResult sendFrame(const replay_profile::ReplayFrame& frame) {
-  return sendSymbols(frame.symbols, frame.count);
+SendResult sendFrame(const replay_profile::ReplayFrame& frame,
+                     uint8_t repeatCount) {
+  return sendSymbols(frame.symbols, frame.count, repeatCount);
 }
 
 SendResult sendFrameWithRetries(const replay_profile::ReplayFrame& frame,
+                                uint8_t repeatCount,
                                 uint8_t additionalRetries) {
   SendResult result = SendResult::kInvalid;
   for (uint8_t attempt = 0; attempt <= additionalRetries; ++attempt) {
-    result = sendFrame(frame);
+    result = sendFrame(frame, repeatCount);
     if (result == SendResult::kOk) {
       return result;
     }
@@ -389,8 +459,9 @@ SendResult sendFrameWithRetries(const replay_profile::ReplayFrame& frame,
 void resetTimers() {
   g_countdownEndMs = 0;
   g_bulbOpenedAtMs = 0;
+  g_bulbCloseDeadlineMs = 0;
   g_lastRenderedCountdownSeconds = -1;
-  g_lastRenderedElapsedSeconds = -1;
+  g_lastRenderedElapsedBucket = -1;
 }
 
 void enterIdle(TriggerMode mode) {
@@ -409,9 +480,16 @@ void enterError(ErrorReason reason) {
   playLatchedErrorAlarm();
 }
 
-void cycleDelay() {
-  g_delayIndex = (g_delayIndex + 1) %
-      (sizeof(kDelayOptionsSeconds) / sizeof(kDelayOptionsSeconds[0]));
+void cycleIdlePreset() {
+  if (g_triggerMode == TriggerMode::Shot) {
+    g_shotDelayIndex = (g_shotDelayIndex + 1) %
+        (sizeof(kShotCountdownOptionsSeconds) /
+         sizeof(kShotCountdownOptionsSeconds[0]));
+  } else {
+    g_bulbExposureIndex = (g_bulbExposureIndex + 1) %
+        (sizeof(kBulbExposureOptionsMs) / sizeof(kBulbExposureOptionsMs[0]));
+  }
+
   drawScreen();
 }
 
@@ -433,9 +511,9 @@ void toggleTriggerMode() {
 void startCountdown() {
   g_runtimeState = RuntimeState::Countdown;
   g_errorReason = ErrorReason::None;
-  g_countdownEndMs = millis() + (kDelayOptionsSeconds[g_delayIndex] * 1000UL);
+  g_countdownEndMs = millis() + currentCountdownDurationMs();
   g_lastRenderedCountdownSeconds = -1;
-  g_lastRenderedElapsedSeconds = -1;
+  g_lastRenderedElapsedBucket = -1;
   playStartTone();
   drawScreen();
 }
@@ -449,7 +527,8 @@ void runShotSend() {
   g_runtimeState = RuntimeState::SendingShot;
   drawScreen();
 
-  const SendResult result = sendFrame(replay_profile::kInstantFrame);
+  const SendResult result = sendFrame(replay_profile::kInstantFrame,
+                                      replay_profile::kSendRepeats);
   if (result == SendResult::kOk) {
     playShotSuccessTone();
   } else {
@@ -464,6 +543,7 @@ void runBulbOpen() {
   drawScreen();
 
   const SendResult result = sendFrameWithRetries(replay_profile::bulbOpenFrame(),
+                                                 replay_profile::kBulbSendRepeats,
                                                  kBulbOpenRetries);
   if (result != SendResult::kOk) {
     enterError(ErrorReason::OpenFailed);
@@ -474,7 +554,8 @@ void runBulbOpen() {
   g_errorReason = ErrorReason::None;
   g_countdownEndMs = 0;
   g_bulbOpenedAtMs = millis();
-  g_lastRenderedElapsedSeconds = -1;
+  g_bulbCloseDeadlineMs = g_bulbOpenedAtMs + currentBulbExposureMs();
+  g_lastRenderedElapsedBucket = -1;
   playBulbOpenTone();
   drawScreen();
 }
@@ -484,6 +565,7 @@ void runBulbClose() {
   drawScreen();
 
   const SendResult result = sendFrameWithRetries(replay_profile::bulbCloseFrame(),
+                                                 replay_profile::kBulbSendRepeats,
                                                  kBulbCloseRetries);
   if (result != SendResult::kOk) {
     enterError(ErrorReason::CloseFailed);
@@ -512,9 +594,10 @@ void maybeRenderBulbElapsedTick() {
     return;
   }
 
-  const int elapsedSeconds = bulbElapsedSeconds();
-  if (elapsedSeconds != g_lastRenderedElapsedSeconds) {
-    g_lastRenderedElapsedSeconds = elapsedSeconds;
+  const int elapsedBucket = static_cast<int>(displayBulbElapsedMs() /
+      kElapsedRenderStepMs);
+  if (elapsedBucket != g_lastRenderedElapsedBucket) {
+    g_lastRenderedElapsedBucket = elapsedBucket;
     drawScreen();
   }
 }
@@ -531,7 +614,8 @@ void advanceRuntime() {
   }
 
   if (g_runtimeState == RuntimeState::BulbOpen &&
-      (millis() - g_bulbOpenedAtMs) >= kBulbSafetyTimeoutMs) {
+      g_bulbCloseDeadlineMs != 0 &&
+      static_cast<int32_t>(millis() - g_bulbCloseDeadlineMs) >= 0) {
     runBulbClose();
   }
 }
@@ -544,7 +628,7 @@ void handleButtons() {
     }
 
     if (M5.BtnA.wasClicked()) {
-      cycleDelay();
+      cycleIdlePreset();
     }
 
     if (M5.BtnB.wasPressed()) {

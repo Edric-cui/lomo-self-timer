@@ -15,6 +15,7 @@ constexpr uint32_t kCarrierFrequencyHz = 38000;
 constexpr float kCarrierDutyCycle = 0.50f;
 constexpr uint8_t kSendRepeats = 5;
 constexpr uint32_t kRepeatGapMs = 50;
+constexpr uint8_t kBulbSendRepeats = 1;
 
 // Validated on 2026-04-18 with a Lomo'Instant Wide Glass body.
 static const IrSymbol kInstantSymbols[] = {
@@ -49,17 +50,49 @@ constexpr size_t kInstantSymbolCount =
 
 constexpr ReplayFrame kInstantFrame = {kInstantSymbols, kInstantSymbolCount};
 
-// Bulb remains locked until the TIME button waveform is captured, classified,
-// and validated on an empty camera body. Do not replace these placeholders with
-// speculative arrays.
+// Captured on 2026-04-20 from the original TIME button with a stable
+// single-frame outcome across 6 accepted samples. This is a candidate for
+// empty-camera validation; public docs should still treat bulb support as
+// unvalidated until the camera body confirms open/close behavior.
+static const IrSymbol kBulbOpenSymbols[] = {
+    {1170, 518, 0, 1},
+    {1199, 488, 0, 1},
+    {498, 1193, 0, 1},
+    {1220, 490, 0, 1},
+    {1199, 489, 0, 1},
+    {471, 1221, 0, 1},
+    {519, 1190, 0, 1},
+    {497, 1191, 0, 1},
+    {1196, 516, 0, 1},
+    {498, 1190, 0, 1},
+    {497, 1195, 0, 1},
+    {518, 7993, 0, 1},
+    {1196, 492, 0, 1},
+    {1198, 489, 0, 1},
+    {496, 1198, 0, 1},
+    {1218, 489, 0, 1},
+    {1199, 491, 0, 1},
+    {520, 1190, 0, 1},
+    {499, 1189, 0, 1},
+    {499, 1194, 0, 1},
+    {1219, 490, 0, 1},
+    {498, 1190, 0, 1},
+    {495, 1217, 0, 1},
+    {499, 0, 0, 1},
+};
+
+constexpr size_t kBulbOpenSymbolCount =
+    sizeof(kBulbOpenSymbols) / sizeof(kBulbOpenSymbols[0]);
+
+constexpr bool kHasBulbCandidateProfile = true;
 constexpr bool kHasValidatedBulbProfile = false;
 
 inline ReplayFrame bulbOpenFrame() {
-  return {nullptr, 0};
+  return {kBulbOpenSymbols, kBulbOpenSymbolCount};
 }
 
 inline ReplayFrame bulbCloseFrame() {
-  return {nullptr, 0};
+  return {kBulbOpenSymbols, kBulbOpenSymbolCount};
 }
 
 }  // namespace replay_profile
