@@ -8,7 +8,7 @@
 
 <img src="docs/images/device-overview.jpeg" alt="连接外置 IR 发射模块的 M5StickS3 自拍定时器" width="720" />
 
-定时器主机通过外置 IR 发射模块向相机发送信号。
+外置 **U002 IR 发射模块** 是可选的。只用 M5StickS3 本体也可以向相机发送 IR 触发信号；加上 U002 则可以增强发射强度，并带来更灵活的摆位方式。
 
 <img src="docs/images/ir-sender-labeled.jpeg" alt="标出外置 IR 发射模块的照片" width="720" />
 
@@ -25,7 +25,7 @@
 2. 安装 `M5Stack` 开发板支持包，并选择 `M5StickS3`。
 3. 在库管理器中安装 `M5Unified` 库。
 4. 打开并上传 `firmware/self_timer/self_timer.ino` 到你的设备。
-5. 将 StickS3 对准相机正面的红外接收器（最佳距离约 40cm 内）。
+5. 将 StickS3 本体，或可选的 U002 IR 发射模块，对准相机的红外接收器（最佳距离约 40cm 内）。
 6. **操作说明:**
    - **BtnB (正面/M5键):** 开始/取消倒计时。
    - **BtnA (侧边键):** 单击切换倒计时/曝光时间。长按切换 **Shot (单拍) 模式** 和 **Bulb (B门) 模式**。
@@ -40,4 +40,4 @@
 
 ## 实验记录与技术深度解析
 
-如果你对如何抓取、逆向工程和验证 Lomo 的红外协议感兴趣，请参阅 [docs/](docs/) 目录。主 README 刻意保持简短——本仓库的代码已经是开箱即用的成品状态！
+如果你对如何抓取、逆向工程和验证 Lomo 的红外协议感兴趣，请参阅 [docs/](docs/) 目录。如果你想学习其他相机的遥控信号，可以从 `firmware/ir_capture/ir_capture.ino` 开始，用它来采集对应遥控器的 IR 输出。主 README 刻意保持简短，本仓库的代码已经是开箱即用的成品状态。

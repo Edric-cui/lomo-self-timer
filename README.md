@@ -8,7 +8,7 @@ A ready-to-use, battery-powered IR self-timer and remote for the **Lomo'Instant 
 
 <img src="docs/images/device-overview.jpeg" alt="M5StickS3 self-timer connected to the external IR sender module" width="720" />
 
-The timer unit connects to an external IR sender module.
+The external **U002 IR sender** is optional. The M5StickS3 can send the trigger signal to the camera by itself, and adding the U002 boosts output strength and gives you more placement flexibility.
 
 <img src="docs/images/ir-sender-labeled.jpeg" alt="Labeled photo showing the external IR sender module" width="720" />
 
@@ -25,7 +25,7 @@ The camera can receive the trigger from either the front or rear IR receiver.
 2. Install the `M5Stack` board package and select `M5StickS3`.
 3. Install the `M5Unified` library in the Library Manager.
 4. Open and upload `firmware/self_timer/self_timer.ino` to your device.
-5. Point the StickS3 at the camera's front IR receiver (works best within ~40cm).
+5. Point the StickS3 itself, or the optional U002 IR sender, at the camera's IR receiver (works best within ~40cm).
 6. **Controls:**
    - **BtnB (Front/M5):** Start/cancel countdown.
    - **BtnA (Side):** Click to cycle timer/exposure duration. Hold to toggle between **Shot Mode** and **Bulb Mode**.
@@ -40,4 +40,4 @@ Due to the nature of analog instant film and the Lomo mechanical shutter, true m
 
 ## Experiments & Deep Dive
 
-If you're curious about how the Lomo IR protocol was decoded, reverse-engineered, and validated, you can read more in the [docs/](docs/) directory. We keep the main README short—this repo is ready to use out of the box!
+If you're curious about how the Lomo IR protocol was decoded, reverse-engineered, and validated, you can read more in the [docs/](docs/) directory. If you want to learn signals from other cameras, start with `firmware/ir_capture/ir_capture.ino` and capture their remote output there. We keep the main README short—this repo is ready to use out of the box!
