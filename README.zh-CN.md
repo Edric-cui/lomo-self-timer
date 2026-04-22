@@ -4,6 +4,21 @@
 
 基于 **M5StickS3** 打造的 **Lomo'Instant Wide Glass** 红外自拍和遥控器。开箱即用，内置电池供电。
 
+## 硬件
+
+<img src="docs/images/device-overview.jpeg" alt="连接外置 IR 发射模块的 M5StickS3 自拍定时器" width="720" />
+
+定时器主机通过外置 IR 发射模块向相机发送信号。
+
+<img src="docs/images/ir-sender-labeled.jpeg" alt="标出外置 IR 发射模块的照片" width="720" />
+
+## IR 接收器位置
+
+相机前后两侧的 IR 接收器都可以接收触发信号。
+
+<img src="docs/images/camera-front-receiver.png" alt="Lomo'Instant Wide Glass 正面 IR 接收器位置" width="360" />
+<img src="docs/images/camera-back-receiver.png" alt="Lomo'Instant Wide Glass 背面 IR 接收器位置" width="360" />
+
 ## 快速开始
 
 1. 安装 [Arduino IDE 2.x](https://www.arduino.cc/en/software)。

@@ -4,6 +4,21 @@
 
 **M5StickS3** をベースにした、**Lomo'Instant Wide Glass** 向けのすぐに使えるバッテリー内蔵の赤外線セルフタイマー・リモートです。
 
+## ハードウェア
+
+<img src="docs/images/device-overview.jpeg" alt="外付け IR 送信モジュールを接続した M5StickS3 セルフタイマー" width="720" />
+
+タイマー本体は、外付けの IR 送信モジュールに接続して使います。
+
+<img src="docs/images/ir-sender-labeled.jpeg" alt="外付け IR 送信モジュールの位置を示した写真" width="720" />
+
+## IR 受光部の位置
+
+カメラは前面・背面どちらの IR 受光部でもトリガーできます。
+
+<img src="docs/images/camera-front-receiver.png" alt="Lomo'Instant Wide Glass 前面の IR 受光部の位置" width="360" />
+<img src="docs/images/camera-back-receiver.png" alt="Lomo'Instant Wide Glass 背面の IR 受光部の位置" width="360" />
+
 ## クイックスタート
 
 1. [Arduino IDE 2.x](https://www.arduino.cc/en/software) をインストールします。

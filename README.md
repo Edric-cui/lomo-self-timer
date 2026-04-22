@@ -4,6 +4,21 @@
 
 A ready-to-use, battery-powered IR self-timer and remote for the **Lomo'Instant Wide Glass**, built around the **M5StickS3**.
 
+## Hardware
+
+<img src="docs/images/device-overview.jpeg" alt="M5StickS3 self-timer connected to the external IR sender module" width="720" />
+
+The timer unit connects to an external IR sender module.
+
+<img src="docs/images/ir-sender-labeled.jpeg" alt="Labeled photo showing the external IR sender module" width="720" />
+
+## IR Receiver Locations
+
+The camera can receive the trigger from either the front or rear IR receiver.
+
+<img src="docs/images/camera-front-receiver.png" alt="Front IR receiver location on the Lomo'Instant Wide Glass" width="360" />
+<img src="docs/images/camera-back-receiver.png" alt="Rear IR receiver location on the Lomo'Instant Wide Glass" width="360" />
+
 ## Quick Start
 
 1. Install [Arduino IDE 2.x](https://www.arduino.cc/en/software).
