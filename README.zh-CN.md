@@ -10,7 +10,7 @@
 
 外置 **U002 IR 发射模块** 是可选的。只用 M5StickS3 本体也可以向相机发送 IR 触发信号；加上 U002 则可以增强发射强度，并带来更灵活的摆位方式。
 
-<img src="docs/images/ir-sender-labeled.jpeg" alt="标出外置 IR 发射模块的照片" width="720" />
+<img src="docs/images/ir-sender-labeled-v2.jpeg" alt="标出外置 IR 发射模块的照片" width="720" />
 
 ## IR 接收器位置
 

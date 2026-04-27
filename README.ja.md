@@ -10,7 +10,7 @@
 
 外付けの **U002 IR 送信モジュール** は任意です。M5StickS3 本体だけでもカメラへ IR 信号を送れます。U002 を追加すると、出力が強くなり、設置位置の自由度も上がります。
 
-<img src="docs/images/ir-sender-labeled.jpeg" alt="外付け IR 送信モジュールの位置を示した写真" width="720" />
+<img src="docs/images/ir-sender-labeled-v2.jpeg" alt="外付け IR 送信モジュールの位置を示した写真" width="720" />
 
 ## IR 受光部の位置
 

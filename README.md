@@ -10,7 +10,7 @@ A ready-to-use, battery-powered IR self-timer and remote for the **Lomo'Instant 
 
 The external **U002 IR sender** is optional. The M5StickS3 can send the trigger signal to the camera by itself, and adding the U002 boosts output strength and gives you more placement flexibility.
 
-<img src="docs/images/ir-sender-labeled.jpeg" alt="Labeled photo showing the external IR sender module" width="720" />
+<img src="docs/images/ir-sender-labeled-v2.jpeg" alt="Labeled photo showing the external IR sender module" width="720" />
 
 ## IR Receiver Locations
 
