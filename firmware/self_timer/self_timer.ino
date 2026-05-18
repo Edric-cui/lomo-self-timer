@@ -303,12 +303,12 @@ void drawScreen() {
     case RuntimeState::SendingShot:
       M5.Display.println("Go:0s");
       M5.Display.println("St:Shot send");
-      M5.Display.println("Front/Side ignored");
+      M5.Display.println("Btns ignored");
       break;
     case RuntimeState::BulbOpening:
       M5.Display.println("Go:0s");
       M5.Display.println("St:Open send");
-      M5.Display.println("Front/Side ignored");
+      M5.Display.println("Btns ignored");
       break;
     case RuntimeState::BulbOpen: {
       char elapsedLabel[16];
@@ -321,11 +321,11 @@ void drawScreen() {
     }
     case RuntimeState::BulbClosing:
       M5.Display.println("St:Close send");
-      M5.Display.println("Front/Side ignored");
+      M5.Display.println("Btns ignored");
       break;
     case RuntimeState::Error:
       M5.Display.printf("Err:%s\n", errorReasonLabel(g_errorReason));
-      M5.Display.println("St:reset Front/Side");
+      M5.Display.println("St:reset Btns");
       M5.Display.println("Boot -> SHOT");
       break;
   }
