@@ -57,7 +57,7 @@ If upload fails, retry with the official StickS3 download-mode flow.
 What to expect:
 
 - the screen shows `Lomo IR Capture`
-- `BtnA` switches receive backend between `Built-in` and `U002`
+- `Front Btn` switches receive backend between `Built-in` and `U002`
 - the selected receive backend is saved across reboot
 - valid captures print `IrSymbol` arrays to Serial Monitor
 
@@ -73,9 +73,9 @@ any single "perfect" capture.
 
 1. Open `firmware/ir_diagnostics/ir_diagnostics.ino`.
 2. Upload it.
-3. Use `BtnA` short press to change the focused setting.
-4. Use `BtnA` long press to move focus between `TX`, `RX`, and `Mode`.
-5. Use `BtnB` to run the active diagnostic.
+3. Use `Front Btn` short press to change the focused setting.
+4. Use `Front Btn` long press to move focus between `TX`, `RX`, and `Mode`.
+5. Use `Side Btn` to run the active diagnostic.
 
 Recommended order:
 
@@ -104,10 +104,12 @@ The production sketch uses the shared profile in
 
 Current self-timer controls:
 
-- `BtnA` (hold): toggle between Shot Mode and Bulb Mode
-- `BtnA` (click): cycle delay (`3s`, `5s`, `10s`, `15s`, `20s`) or exposure time
-- `BtnB`: start countdown or trigger action
-- `BtnB` during action: cancel or stop early
+- `Front Btn` (front blue bar, hold): toggle between Shot Mode and Bulb Mode
+- `Front Btn` (front blue bar, click): cycle delay (`3s`, `5s`, `10s`, `15s`, `20s`) or exposure time
+- `Side Btn` (side large rectangle): start countdown or trigger action
+- `Side Btn` during action: cancel or close Bulb exposure
+- The small side button is power-only and is not part of the self-timer UI.
+- The title line shows battery percentage; `+` means the StickS3 is charging.
 
 The production sender does not expose backend switching on-device. Dual TX is
 the fixed production behavior in the current repo.
@@ -117,7 +119,7 @@ the fixed production behavior in the current repo.
 1. Point the StickS3 toward the camera's IR receiver.
 2. Set the delay to `3s`.
 3. Start around `40cm`.
-4. Press `BtnB`.
+4. Press `Side Btn`.
 5. Watch for the status flow:
    - `Counting down`
    - `Sending...`

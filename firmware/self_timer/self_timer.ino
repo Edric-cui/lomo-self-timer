@@ -143,6 +143,43 @@ void printCurrentPresetLine() {
   M5.Display.printf("Exp:%s IR:Dual\n", exposureLabel);
 }
 
+void formatBatteryLabel(char* buffer, size_t bufferSize) {
+  int32_t batteryLevel = M5.Power.getBatteryLevel();
+  if (batteryLevel > 100) {
+    batteryLevel = 100;
+  } else if (batteryLevel < 0) {
+    batteryLevel = -1;
+  }
+
+  const bool isCharging =
+      M5.Power.isCharging() == m5::Power_Class::is_charging;
+  if (batteryLevel < 0) {
+    snprintf(buffer, bufferSize, "%s", isCharging ? "USB" : "Bat?");
+    return;
+  }
+
+  snprintf(buffer, bufferSize, "%ld%%%s",
+           static_cast<long>(batteryLevel),
+           isCharging ? "+" : "");
+}
+
+void drawTitleLine() {
+  char batteryLabel[8];
+  formatBatteryLabel(batteryLabel, sizeof(batteryLabel));
+
+  M5.Display.setCursor(0, 0);
+  M5.Display.print("Lomo Timer");
+
+  const int16_t batteryX =
+      M5.Display.width() - M5.Display.textWidth(batteryLabel);
+  if (batteryX > M5.Display.getCursorX() + 4) {
+    M5.Display.setCursor(batteryX, 0);
+    M5.Display.print(batteryLabel);
+  }
+
+  M5.Display.setCursor(0, M5.Display.fontHeight());
+}
+
 bool bulbProfileReady() {
   const replay_profile::ReplayFrame openFrame = replay_profile::bulbOpenFrame();
   const replay_profile::ReplayFrame closeFrame = replay_profile::bulbCloseFrame();
@@ -236,8 +273,7 @@ uint32_t displayBulbElapsedMs() {
 
 void drawScreen() {
   M5.Display.clear();
-  M5.Display.setCursor(0, 0);
-  M5.Display.println("Lomo Timer");
+  drawTitleLine();
   M5.Display.printf("Mode:%s\n", triggerModeLabel(g_triggerMode));
   printCurrentPresetLine();
 
@@ -249,46 +285,47 @@ void drawScreen() {
         M5.Display.println("St:Ready");
       }
       M5.Display.println(g_triggerMode == TriggerMode::Shot ?
-          "BtnA tap delay" : "BtnA tap exp");
+          "Front Btn tap delay" : "Front Btn tap exp");
       if (g_triggerMode == TriggerMode::Shot) {
-        M5.Display.println(bulbProfileReady() ? "BtnA hold BULB" : "BtnA ignored");
+        M5.Display.println(bulbProfileReady() ?
+            "Front Btn hold BULB" : "Front Btn ignored");
       } else {
-        M5.Display.println("BtnA hold SHOT");
+        M5.Display.println("Front Btn hold SHOT");
       }
-      M5.Display.println("BtnB start");
+      M5.Display.println("Side Btn start");
       break;
     case RuntimeState::Countdown:
       M5.Display.printf("Go:%ds\n", countdownRemainingSeconds());
       M5.Display.println("St:Counting");
-      M5.Display.println("BtnA ignored");
-      M5.Display.println("BtnB cancel");
+      M5.Display.println("Front Btn ignored");
+      M5.Display.println("Side Btn cancel");
       break;
     case RuntimeState::SendingShot:
       M5.Display.println("Go:0s");
       M5.Display.println("St:Shot send");
-      M5.Display.println("BtnA/B ignored");
+      M5.Display.println("Front/Side ignored");
       break;
     case RuntimeState::BulbOpening:
       M5.Display.println("Go:0s");
       M5.Display.println("St:Open send");
-      M5.Display.println("BtnA/B ignored");
+      M5.Display.println("Front/Side ignored");
       break;
     case RuntimeState::BulbOpen: {
       char elapsedLabel[16];
       formatDurationMs(displayBulbElapsedMs(), elapsedLabel, sizeof(elapsedLabel));
       M5.Display.printf("Open:%s\n", elapsedLabel);
       M5.Display.println("St:Presumed");
-      M5.Display.println("BtnA ignored");
-      M5.Display.println("BtnB close");
+      M5.Display.println("Front Btn ignored");
+      M5.Display.println("Side Btn close");
       break;
     }
     case RuntimeState::BulbClosing:
       M5.Display.println("St:Close send");
-      M5.Display.println("BtnA/B ignored");
+      M5.Display.println("Front/Side ignored");
       break;
     case RuntimeState::Error:
       M5.Display.printf("Err:%s\n", errorReasonLabel(g_errorReason));
-      M5.Display.println("St:reset BtnA/B");
+      M5.Display.println("St:reset Front/Side");
       M5.Display.println("Boot -> SHOT");
       break;
   }

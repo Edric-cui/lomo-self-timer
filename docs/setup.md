@@ -64,13 +64,13 @@ This is the reverse of what the M5Stack U002 datasheet suggests. See
 ## Sketch Roles
 
 - `firmware/ir_capture/ir_capture.ino`
-  Captures timing clues from the original remote. `BtnA` switches receive
+  Captures timing clues from the original remote. `Front Btn` switches receive
   backend and the selected backend is persisted.
 - `firmware/ir_diagnostics/ir_diagnostics.ino`
   Validates TX and RX behavior without spending film. TX and RX backends are
   selected independently and persisted.
 - `firmware/self_timer/self_timer.ino`
-  Production sender. `BtnA` click cycles timer/exposure delay, `BtnA` hold toggles Shot/Bulb mode. `BtnB` starts/stops action. Dual TX is always enabled.
+  Production sender. The front blue bar (`Front Btn`) click cycles timer/exposure delay, and hold toggles Shot/Bulb mode. The side large rectangle (`Side Btn`) starts/stops action. Dual TX is always enabled.
 
 ## Validated Replay Profile
 

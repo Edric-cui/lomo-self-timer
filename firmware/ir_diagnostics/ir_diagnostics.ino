@@ -82,7 +82,7 @@ IrBackend g_rxBackend = IrBackend::U002;
 FocusField g_focus = FocusField::TxBackend;
 TestMode g_testMode = TestMode::Beacon33k;
 String g_resultLine1 = "Ready";
-String g_resultLine2 = "BtnB run test";
+String g_resultLine2 = "Side Btn run test";
 uint32_t g_serialDumpIndex = 0;
 
 static const IrSymbol kSyntheticShotSymbols[] = {
@@ -371,7 +371,7 @@ void advanceFocus() {
       break;
   }
 
-  setResult(String("Focus: ") + focusLabel(g_focus), "BtnB run test");
+  setResult(String("Focus: ") + focusLabel(g_focus), "Side Btn run test");
 }
 
 void cycleFocusedSetting() {
@@ -384,7 +384,7 @@ void cycleFocusedSetting() {
       return;
     case FocusField::TestMode:
       g_testMode = static_cast<TestMode>((static_cast<uint8_t>(g_testMode) + 1) % 5);
-      setResult(String("Mode: ") + modeLabel(g_testMode), "BtnB run test");
+      setResult(String("Mode: ") + modeLabel(g_testMode), "Side Btn run test");
       return;
   }
 }

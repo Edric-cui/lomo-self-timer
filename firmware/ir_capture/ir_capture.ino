@@ -191,7 +191,7 @@ void printLearningGuide() {
   Serial.println("3. Capture 8-10 raw frames and keep at least 6 accepted frames.");
   Serial.println("4. Accepted frames must keep symbol count, level pattern, and");
   Serial.println("   per-position short/long structure stable.");
-  Serial.println("5. If the first accepted frame looks wrong, press BtnB to reset");
+  Serial.println("5. If the first accepted frame looks wrong, press Side Btn");
   Serial.println("   the learning set and start over.");
   Serial.println("6. Do not promote any bulb frame into replay_profile.h until");
   Serial.println("   empty-camera validation succeeds.");
@@ -489,7 +489,7 @@ void printLearningSummary(const IrSymbol* symbols,
   if (g_learningOutcome == LearningOutcome::kPending) {
     Serial.println("Need more accepted captures before promotion.");
   } else if (g_learningOutcome == LearningOutcome::kInconclusive) {
-    Serial.println("Odd/even clustering is unstable. Reset with BtnB and resample.");
+    Serial.println("Odd/even clustering is unstable. Reset with Side Btn and resample.");
   } else {
     Serial.println("Still validate on the real camera body before promotion.");
   }
@@ -501,7 +501,7 @@ void printStructuralReject(uint32_t captureIndex, size_t symbolCount) {
   Serial.printf("Symbol count: %u\n", static_cast<unsigned>(symbolCount));
   Serial.println("Valid raw frame, but rejected from accepted set.");
   Serial.println("Reason: introduced a third structural shape or broke the");
-  Serial.println("existing odd/even clustering. Reset with BtnB and retry if");
+  Serial.println("existing odd/even clustering. Reset with Side Btn and retry if");
   Serial.println("the first accepted capture was likely an outlier.");
 }
 

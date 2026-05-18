@@ -27,8 +27,10 @@ The camera can receive the trigger from either the front or rear IR receiver.
 4. Open and upload `firmware/self_timer/self_timer.ino` to your device.
 5. Point the StickS3 itself, or the optional U002 IR sender, at the camera's IR receiver (works best within ~40cm).
 6. **Controls:**
-   - **BtnB (Front/M5):** Start/cancel countdown.
-   - **BtnA (Side):** Click to cycle timer/exposure duration. Hold to toggle between **Shot Mode** and **Bulb Mode**.
+   - **Front blue bar button (`Front Btn`):** Click to cycle timer/exposure duration. Hold to toggle between **Shot Mode** and **Bulb Mode**.
+   - **Side large rectangle button (`Side Btn`):** Start/cancel countdown or close Bulb exposure.
+   - **Small side button:** Power control only; it is not used by the self-timer UI.
+   - The title line shows battery percentage; `+` means the StickS3 is charging.
 
 ## Bulb Mode Limitations
 
