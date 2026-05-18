@@ -31,6 +31,7 @@ The camera can receive the trigger from either the front or rear IR receiver.
    - **Side large rectangle button (`Side Btn`):** Start/cancel countdown or close Bulb exposure.
    - **Small side button:** Power control only; it is not used by the self-timer UI.
    - The title line shows battery percentage; `+` means the StickS3 is charging.
+   - On battery power, the device automatically powers off after 5 minutes idle. It stays on while USB is connected.
 
 ## Bulb Mode Limitations
 

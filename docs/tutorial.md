@@ -110,6 +110,8 @@ Current self-timer controls:
 - `Side Btn` during action: cancel or close Bulb exposure
 - The small side button is power-only and is not part of the self-timer UI.
 - The title line shows battery percentage; `+` means the StickS3 is charging.
+- On battery power, the sender automatically powers off after 5 minutes idle.
+  It stays on while USB is connected.
 
 The production sender does not expose backend switching on-device. Dual TX is
 the fixed production behavior in the current repo.

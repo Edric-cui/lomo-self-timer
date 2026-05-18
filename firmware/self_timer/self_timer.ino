@@ -15,6 +15,8 @@ constexpr uint32_t kBulbCountdownMs = 3000;
 constexpr uint8_t kBulbOpenRetries = 1;
 constexpr uint8_t kBulbCloseRetries = 2;
 constexpr uint32_t kElapsedRenderStepMs = 250;
+constexpr uint32_t kIdleAutoPowerOffMs = 5UL * 60UL * 1000UL;
+constexpr int16_t kUsbPresentThresholdMv = 4000;
 
 constexpr uint8_t kShotCountdownOptionsSeconds[] = {3, 5, 10, 15, 20};
 constexpr uint32_t kBulbExposureOptionsMs[] = {
@@ -57,6 +59,7 @@ ErrorReason g_errorReason = ErrorReason::None;
 uint32_t g_countdownEndMs = 0;
 uint32_t g_bulbOpenedAtMs = 0;
 uint32_t g_bulbCloseDeadlineMs = 0;
+uint32_t g_lastUserActivityMs = 0;
 int g_lastRenderedCountdownSeconds = -1;
 int g_lastRenderedElapsedBucket = -1;
 
@@ -248,6 +251,18 @@ void playLatchedErrorAlarm() {
   playBeep(330.0f, 180);
   delay(60);
   playBeep(262.0f, 220);
+}
+
+void markUserActivity() {
+  g_lastUserActivityMs = millis();
+}
+
+bool usbPowerPresent() {
+  if (M5.Power.getVBUSVoltage() >= kUsbPresentThresholdMv) {
+    return true;
+  }
+
+  return M5.Power.isCharging() == m5::Power_Class::is_charging;
 }
 
 uint32_t countdownRemainingMs() {
@@ -506,6 +521,7 @@ void enterIdle(TriggerMode mode) {
   g_runtimeState = RuntimeState::Idle;
   g_errorReason = ErrorReason::None;
   resetTimers();
+  markUserActivity();
   drawScreen();
 }
 
@@ -657,18 +673,47 @@ void advanceRuntime() {
   }
 }
 
+void autoPowerOff() {
+  M5.Display.clear();
+  drawTitleLine();
+  M5.Display.println("Auto power off");
+  M5.Display.println("Idle 5 min");
+  playBeep(880.0f, 120);
+  delay(180);
+  M5.Power.setExtOutput(false);
+  M5.Power.powerOff();
+  while (true) {
+    delay(1000);
+  }
+}
+
+void maybeAutoPowerOff() {
+  if (g_runtimeState != RuntimeState::Idle || usbPowerPresent()) {
+    return;
+  }
+
+  const uint32_t powerOffDeadlineMs =
+      g_lastUserActivityMs + kIdleAutoPowerOffMs;
+  if (static_cast<int32_t>(millis() - powerOffDeadlineMs) >= 0) {
+    autoPowerOff();
+  }
+}
+
 void handleButtons() {
   if (g_runtimeState == RuntimeState::Idle) {
     if (M5.BtnA.wasHold()) {
+      markUserActivity();
       toggleTriggerMode();
       return;
     }
 
     if (M5.BtnA.wasClicked()) {
+      markUserActivity();
       cycleIdlePreset();
     }
 
     if (M5.BtnB.wasPressed()) {
+      markUserActivity();
       startCountdown();
     }
     return;
@@ -676,6 +721,7 @@ void handleButtons() {
 
   if (g_runtimeState == RuntimeState::Countdown) {
     if (M5.BtnB.wasPressed()) {
+      markUserActivity();
       cancelCountdown();
     }
     return;
@@ -683,6 +729,7 @@ void handleButtons() {
 
   if (g_runtimeState == RuntimeState::BulbOpen) {
     if (M5.BtnB.wasPressed()) {
+      markUserActivity();
       runBulbClose();
     }
     return;
@@ -690,6 +737,7 @@ void handleButtons() {
 
   if (g_runtimeState == RuntimeState::Error) {
     if (M5.BtnA.wasPressed() || M5.BtnB.wasPressed()) {
+      markUserActivity();
       enterIdle(TriggerMode::Shot);
     }
   }
@@ -720,5 +768,6 @@ void loop() {
   maybeRenderCountdownTick();
   maybeRenderBulbElapsedTick();
   advanceRuntime();
+  maybeAutoPowerOff();
   delay(10);
 }
